@@ -31,7 +31,7 @@ jobs:
         run: npm install
 
       - name: Build Mac DMG + ZIP (unsigned, arm64 + x64)
-        run: npm run dist:mac
+        run: npm run dist:mac -- --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
