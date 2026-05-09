@@ -6,6 +6,15 @@ All notable changes to WisperTalk. Format follows [Keep a Changelog](https://kee
 
 See [`ROADMAP.md`](ROADMAP.md) for v0.3.0 plans.
 
+## [0.2.1] — 2026-05-10
+
+### Fixed
+- Activation window title now reads "Activate WisperTalk" (was "Activate Whisper Talk" — orphan from rebrand).
+
+### Build / Release pipeline
+- CI now produces both Windows (NSIS installer + portable .exe) and macOS (arm64 + x64 DMGs and ZIPs) artifacts in a single `Build & Release` workflow.
+- Artifacts publish to the public [`wispertalk-releases`](https://github.com/bensblueprints/wispertalk-releases) repo (source stays private in `wispertalk-app`).
+
 ## [0.2.0] — 2026-05-09
 
 ### Added

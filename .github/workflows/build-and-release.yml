@@ -1,0 +1,124 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+  build-mac:
+    needs: read-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Mac DMG + ZIP (unsigned, arm64 + x64)
+        run: npm run dist:mac -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: List dist
+        if: always()
+        run: ls -lh dist/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WisperTalk-Mac-${{ needs.read-version.outputs.version }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
+            dist/*.blockmap
+          if-no-files-found: error
+
+      - name: Publish Mac artifacts to public releases repo
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASES_PAT }}
+          repository: bensblueprints/wispertalk-releases
+          tag_name: v${{ needs.read-version.outputs.version }}
+          name: WisperTalk ${{ needs.read-version.outputs.version }}
+          draft: true
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
+
+  build-windows:
+    needs: read-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Windows installer + portable
+        run: npm run dist -- --publish never
+
+      - name: List dist
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem dist | Format-Table
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WisperTalk-Windows-${{ needs.read-version.outputs.version }}
+          path: |
+            dist/*.exe
+            dist/latest.yml
+            dist/*.blockmap
+          if-no-files-found: error
+
+      - name: Publish Windows artifacts to public releases repo
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASES_PAT }}
+          repository: bensblueprints/wispertalk-releases
+          tag_name: v${{ needs.read-version.outputs.version }}
+          name: WisperTalk ${{ needs.read-version.outputs.version }}
+          draft: true
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.exe
+            dist/latest.yml

@@ -237,7 +237,7 @@ function openLicenseWindow() {
   licenseWin = new BrowserWindow({
     width: 600,
     height: 640,
-    title: 'Activate Whisper Talk',
+    title: 'Activate WisperTalk',
     icon: ICON_PATH,
     backgroundColor: '#06070d',
     autoHideMenuBar: true,
