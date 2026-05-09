@@ -4,7 +4,18 @@ All notable changes to WisperTalk. Format follows [Keep a Changelog](https://kee
 
 ## [Unreleased]
 
-Planned for v0.2.0 — see [`ROADMAP.md`](ROADMAP.md).
+See [`ROADMAP.md`](ROADMAP.md) for v0.3.0 plans.
+
+## [0.2.0] — 2026-05-09
+
+### Added
+- **Microphone picker** in Settings → Audio. Lists all input devices via `navigator.mediaDevices.enumerateDevices()`, plus a "Refresh" button that triggers a one-shot `getUserMedia` to unlock device labels. Falls back to system default if the saved deviceId is no longer attached.
+- **Transcription language** selector with 30 common Whisper-supported languages plus auto-detect (default). Sends the `language` field to the Groq `/audio/transcriptions` endpoint when set.
+- New "Audio" tab in Settings between API and Hotkeys.
+
+### Changed
+- `recorder:start` IPC event now carries an `{ inputDeviceId }` payload from main → overlay so audio capture honors the chosen mic.
+- `transcribe()` accepts an optional `language` parameter.
 
 ## [0.1.0] — 2026-05-09
 

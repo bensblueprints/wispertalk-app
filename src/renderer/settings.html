@@ -19,6 +19,7 @@
 
   <nav class="tabs">
     <button data-tab="api" class="active">API</button>
+    <button data-tab="audio">Audio</button>
     <button data-tab="hotkeys">Hotkeys</button>
     <button data-tab="cleanup">Cleanup</button>
     <button data-tab="behavior">Behavior</button>
@@ -50,6 +51,22 @@
           <label>Cleanup LLM model</label>
           <input type="text" id="llmModel" spellcheck="false" />
         </div>
+      </div>
+    </section>
+
+    <section data-pane="audio">
+      <div class="row">
+        <label>Input microphone</label>
+        <div class="input-group">
+          <select id="inputDeviceId" style="flex: 1"></select>
+          <button class="btn-ghost" id="refreshMics" type="button">Refresh</button>
+        </div>
+        <p class="hint" id="micHint">Choose which microphone WisperTalk records from. If labels are missing, click Refresh after granting mic permission once.</p>
+      </div>
+      <div class="row">
+        <label>Transcription language</label>
+        <select id="transcriptionLanguage"></select>
+        <p class="hint">Auto-detect works for most cases. Set explicitly for short utterances or accented speech where Whisper guesses wrong.</p>
       </div>
     </section>
 

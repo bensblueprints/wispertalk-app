@@ -7,6 +7,8 @@ const DEFAULTS = {
   llmApiBaseUrl: 'https://api.groq.com/openai/v1',
   sttModel: 'whisper-large-v3',
   llmModel: 'llama-3.3-70b-versatile',
+  transcriptionLanguage: '',
+  inputDeviceId: '',
   enableLlmCleanup: true,
   cleanupPrompt: `You are a dictation post-processor. You receive raw speech-to-text output and return clean text ready to be typed into an application.
 

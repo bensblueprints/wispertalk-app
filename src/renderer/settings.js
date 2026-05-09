@@ -1,5 +1,6 @@
 const fields = [
   'groqApiKey', 'llmApiBaseUrl', 'sttModel', 'llmModel',
+  'transcriptionLanguage', 'inputDeviceId',
   'enableLlmCleanup', 'useAppContext', 'vocabulary', 'cleanupPrompt',
   'holdEnabled', 'holdHotkey', 'toggleEnabled', 'toggleHotkey',
   'showOverlay', 'autoPaste', 'pasteDelayMs'
@@ -7,6 +8,39 @@ const fields = [
 
 const checkboxes = new Set(['enableLlmCleanup', 'useAppContext', 'holdEnabled', 'toggleEnabled', 'showOverlay', 'autoPaste']);
 const numbers = new Set(['pasteDelayMs']);
+
+const LANGUAGES = [
+  ['', 'Auto-detect'],
+  ['en', 'English'],
+  ['es', 'Spanish · Español'],
+  ['fr', 'French · Français'],
+  ['de', 'German · Deutsch'],
+  ['it', 'Italian · Italiano'],
+  ['pt', 'Portuguese · Português'],
+  ['nl', 'Dutch · Nederlands'],
+  ['ja', 'Japanese · 日本語'],
+  ['zh', 'Chinese · 中文'],
+  ['ko', 'Korean · 한국어'],
+  ['ar', 'Arabic · العربية'],
+  ['hi', 'Hindi · हिन्दी'],
+  ['ru', 'Russian · Русский'],
+  ['pl', 'Polish · Polski'],
+  ['tr', 'Turkish · Türkçe'],
+  ['vi', 'Vietnamese · Tiếng Việt'],
+  ['id', 'Indonesian · Bahasa Indonesia'],
+  ['th', 'Thai · ไทย'],
+  ['uk', 'Ukrainian · Українська'],
+  ['sv', 'Swedish · Svenska'],
+  ['no', 'Norwegian · Norsk'],
+  ['da', 'Danish · Dansk'],
+  ['fi', 'Finnish · Suomi'],
+  ['cs', 'Czech · Čeština'],
+  ['el', 'Greek · Ελληνικά'],
+  ['he', 'Hebrew · עברית'],
+  ['hu', 'Hungarian · Magyar'],
+  ['ro', 'Romanian · Română'],
+  ['ca', 'Catalan · Català']
+];
 
 let initial = null;
 let dirty = false;
@@ -58,6 +92,72 @@ function clearDirty() {
   setTimeout(() => { if (!dirty) setStatus(''); }, 1600);
 }
 
+function populateLanguages() {
+  const sel = el('transcriptionLanguage');
+  for (const [code, label] of LANGUAGES) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+}
+
+async function populateMics({ saved, requestPermission = false } = {}) {
+  const sel = el('inputDeviceId');
+  const hint = el('micHint');
+  sel.innerHTML = '';
+
+  const defaultOpt = document.createElement('option');
+  defaultOpt.value = '';
+  defaultOpt.textContent = 'System default';
+  sel.appendChild(defaultOpt);
+
+  if (requestPermission) {
+    try {
+      const tmpStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tmpStream.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      hint.textContent = `Could not access microphone (${err.name || 'permission'}). Grant mic access in your OS settings, then click Refresh.`;
+      return;
+    }
+  }
+
+  let devices = [];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch (err) {
+    hint.textContent = `Could not list audio devices: ${err.message || err}`;
+    return;
+  }
+
+  const inputs = devices.filter((d) => d.kind === 'audioinput');
+  if (inputs.length === 0) {
+    hint.textContent = 'No microphones detected.';
+    return;
+  }
+
+  const labelsMissing = inputs.every((d) => !d.label);
+  for (let i = 0; i < inputs.length; i++) {
+    const d = inputs[i];
+    const opt = document.createElement('option');
+    opt.value = d.deviceId;
+    opt.textContent = d.label || `Audio input ${i + 1}`;
+    sel.appendChild(opt);
+  }
+
+  if (labelsMissing) {
+    hint.textContent = 'Microphone names hidden until permission is granted. Click Refresh, then allow microphone access.';
+  } else {
+    hint.textContent = 'Choose which microphone WisperTalk records from.';
+  }
+
+  if (saved && [...sel.options].some((o) => o.value === saved)) {
+    sel.value = saved;
+  } else if (saved) {
+    sel.value = '';
+  }
+}
+
 async function init() {
   const choices = await window.flow.getChoices();
   const sel = el('holdHotkey');
@@ -67,8 +167,13 @@ async function init() {
     sel.appendChild(opt);
   }
 
+  populateLanguages();
+
   const cfg = await window.flow.getSettings();
   initial = cfg;
+
+  await populateMics({ saved: cfg.inputDeviceId });
+
   writeAll(cfg);
   setStatus('');
 
@@ -78,6 +183,13 @@ async function init() {
     const evt = (node.tagName === 'SELECT' || node.type === 'checkbox') ? 'change' : 'input';
     node.addEventListener(evt, markDirty);
   }
+
+  el('refreshMics').addEventListener('click', async () => {
+    const current = el('inputDeviceId').value;
+    el('micHint').textContent = 'Refreshing…';
+    await populateMics({ saved: current, requestPermission: true });
+    markDirty();
+  });
 
   document.querySelectorAll('nav.tabs button').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -108,6 +220,7 @@ async function init() {
     if (!confirm('Reset all settings to defaults?')) return;
     const next = await window.flow.resetSettings();
     initial = next;
+    await populateMics({ saved: next.inputDeviceId });
     writeAll(next);
     showToast({ kind: 'success', message: 'Settings reset.' });
     clearDirty();

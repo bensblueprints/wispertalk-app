@@ -69,17 +69,30 @@ function loop() {
   }
 }
 
-async function startRecording() {
+async function startRecording(opts = {}) {
   try {
     chunks = [];
-    mediaStream = await navigator.mediaDevices.getUserMedia({
+    const constraints = {
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
         channelCount: 1
       }
-    });
+    };
+    if (opts && opts.inputDeviceId) {
+      constraints.audio.deviceId = { exact: opts.inputDeviceId };
+    }
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      if (err && err.name === 'OverconstrainedError' && constraints.audio.deviceId) {
+        delete constraints.audio.deviceId;
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } else {
+        throw err;
+      }
+    }
     mimeType = pickMimeType();
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType, audioBitsPerSecond: 96000 });
     mediaRecorder.ondataavailable = (e) => {
@@ -141,7 +154,7 @@ function cleanupStream() {
   stopMeter();
 }
 
-window.flow.onStart(() => startRecording());
+window.flow.onStart((payload) => startRecording(payload));
 window.flow.onStop(() => stopRecording());
 window.flow.onShow((p) => setMode(p?.mode || 'recording'));
 window.flow.onHide(() => hide());

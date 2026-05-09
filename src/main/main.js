@@ -279,7 +279,9 @@ function startRecording() {
     overlayWin.show();
     overlayWin.webContents.send('overlay:show', { mode: 'recording' });
   }
-  overlayWin.webContents.send('recorder:start');
+  overlayWin.webContents.send('recorder:start', {
+    inputDeviceId: store.get('inputDeviceId') || ''
+  });
 }
 
 function stopRecording() {
@@ -395,7 +397,8 @@ async function processAudio(buffer, mimeType) {
     mimeType,
     apiKey: cfg.groqApiKey,
     baseUrl: cfg.llmApiBaseUrl,
-    model: cfg.sttModel
+    model: cfg.sttModel,
+    language: cfg.transcriptionLanguage
   });
 
   if (!raw) {
