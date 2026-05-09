@@ -102,10 +102,15 @@ async function startRecording(opts = {}) {
     mediaRecorder.start(250);
 
     audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
     const src = audioCtx.createMediaStreamSource(mediaStream);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     src.connect(analyser);
+
+    if (!rafId) loop();
   } catch (err) {
     console.error('startRecording failed:', err);
     window.flow.reportError(err.message || String(err));

@@ -6,6 +6,11 @@ All notable changes to WisperTalk. Format follows [Keep a Changelog](https://kee
 
 See [`ROADMAP.md`](ROADMAP.md) for v0.3.0 plans.
 
+## [0.2.2] — 2026-05-10
+
+### Fixed
+- **Audio bars in the floating overlay didn't animate** during recording. Root cause was a race: the renderer received the `overlay:show` event (which kicks off the visualization loop) before `getUserMedia()` resolved and the AudioContext analyser was set up — by the time analyser existed, nothing was watching for it. Now the visualization loop is started at the end of `startRecording()` once the analyser is wired, and the AudioContext is resumed if it was created in a suspended state. Audio capture and transcription were unaffected — this was a visualization-only bug.
+
 ## [0.2.1] — 2026-05-10
 
 ### Fixed
