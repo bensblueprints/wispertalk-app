@@ -1,0 +1,81 @@
+{
+  "name": "wispertalk",
+  "version": "0.1.0",
+  "description": "WisperTalk — voice dictation. $49 lifetime.",
+  "main": "src/main/main.js",
+  "author": {
+    "name": "Ben",
+    "email": "ben@advancedmarketing.co"
+  },
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "icon": "node scripts/make-icon.js",
+    "pack": "npm run icon && electron-builder --dir",
+    "dist": "npm run icon && electron-builder --win",
+    "dist:mac": "electron-builder --mac --arm64 --x64",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.wispertalk.app",
+    "productName": "WisperTalk",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/uiohook-napi/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "Advanced Marketing"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WisperTalk"
+    },
+    "portable": {
+      "artifactName": "WisperTalk-${version}-portable.exe"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "gatekeeperAssess": false,
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "WisperTalk needs microphone access to transcribe your speech.",
+        "NSAppleEventsUsageDescription": "WisperTalk uses AppleScript to paste transcribed text into the focused application."
+      }
+    },
+    "dmg": {
+      "sign": false,
+      "writeUpdateInfo": false
+    }
+  }
+}

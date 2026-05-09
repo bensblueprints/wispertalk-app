@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Activate WisperTalk</title>
+  <link rel="stylesheet" href="license.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <div class="title"><em>Whisper</em> Talk</div>
+          <div class="subtitle">Voice dictation for Windows</div>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero">
+      <h1>Activate your <em>license</em>.</h1>
+      <p class="lede">
+        Enter the license key from your purchase email. One key works on one device at a time —
+        you can move it whenever you want from the Settings panel.
+      </p>
+
+      <form id="form">
+        <label>License key</label>
+        <input
+          id="key"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="WT-XXXX-XXXX-XXXX-XXXX"
+          autofocus
+        />
+        <div id="error" class="error hidden"></div>
+        <div id="conflict" class="conflict hidden">
+          <div class="conflict-title">Already active on another device</div>
+          <div class="conflict-body">
+            This license is currently bound to <strong id="conflict-device">a device</strong>.
+            Move it to this computer? The other device will be deactivated immediately.
+          </div>
+          <div class="conflict-actions">
+            <button type="button" id="cancelMove" class="btn-ghost">Cancel</button>
+            <button type="button" id="confirmMove" class="btn-primary">Move license here</button>
+          </div>
+        </div>
+        <button type="submit" id="submit" class="btn-primary">Activate</button>
+      </form>
+
+      <div class="meta">
+        <a href="#" id="buy">Need a license? Buy one at wispertalk.com →</a>
+        <a href="#" id="quit" class="quit">Quit</a>
+      </div>
+    </section>
+  </main>
+  <script src="license.js"></script>
+</body>
+</html>

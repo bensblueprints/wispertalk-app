@@ -1,0 +1,176 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WisperTalk Settings</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo"></div>
+      <div>
+        <div class="title">WisperTalk</div>
+        <div class="subtitle">Voice dictation</div>
+      </div>
+    </div>
+    <div class="status" id="status"></div>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="api" class="active">API</button>
+    <button data-tab="hotkeys">Hotkeys</button>
+    <button data-tab="cleanup">Cleanup</button>
+    <button data-tab="behavior">Behavior</button>
+    <button data-tab="license">License</button>
+    <button data-tab="history">History</button>
+  </nav>
+
+  <main>
+    <section data-pane="api" class="active">
+      <div class="row">
+        <label>Groq API Key</label>
+        <div class="input-group">
+          <input type="password" id="groqApiKey" placeholder="gsk_..." spellcheck="false" />
+          <button class="btn-ghost" id="toggleKey">Show</button>
+        </div>
+        <p class="hint">Get a free key at <a href="https://console.groq.com" target="_blank">console.groq.com</a>. Stored locally only.</p>
+      </div>
+      <div class="row">
+        <label>API Base URL</label>
+        <input type="text" id="llmApiBaseUrl" placeholder="https://api.groq.com/openai/v1" spellcheck="false" />
+        <p class="hint">OpenAI-compatible. Use Ollama or another provider by changing this.</p>
+      </div>
+      <div class="grid-2">
+        <div class="row">
+          <label>Speech-to-text model</label>
+          <input type="text" id="sttModel" spellcheck="false" />
+        </div>
+        <div class="row">
+          <label>Cleanup LLM model</label>
+          <input type="text" id="llmModel" spellcheck="false" />
+        </div>
+      </div>
+    </section>
+
+    <section data-pane="hotkeys">
+      <div class="row">
+        <label class="checkbox">
+          <input type="checkbox" id="holdEnabled" />
+          <span>Hold-to-talk</span>
+        </label>
+        <p class="hint">Hold a single key to record, release to transcribe and paste.</p>
+      </div>
+      <div class="row">
+        <label>Hold key</label>
+        <select id="holdHotkey"></select>
+      </div>
+      <hr />
+      <div class="row">
+        <label class="checkbox">
+          <input type="checkbox" id="toggleEnabled" />
+          <span>Toggle dictation</span>
+        </label>
+        <p class="hint">Tap a shortcut to start, tap again to stop.</p>
+      </div>
+      <div class="row">
+        <label>Toggle shortcut</label>
+        <input type="text" id="toggleHotkey" placeholder="CommandOrControl+Shift+Space" spellcheck="false" />
+        <p class="hint">Format: <code>Ctrl+Alt+Space</code>, <code>Shift+F19</code>, etc.</p>
+      </div>
+    </section>
+
+    <section data-pane="cleanup">
+      <div class="row">
+        <label class="checkbox">
+          <input type="checkbox" id="enableLlmCleanup" />
+          <span>Run LLM cleanup after transcription</span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="checkbox">
+          <input type="checkbox" id="useAppContext" />
+          <span>Use foreground app + window title as context</span>
+        </label>
+        <p class="hint">Helps with name and term spelling. Only the window title leaves your machine.</p>
+      </div>
+      <div class="row">
+        <label>Custom vocabulary</label>
+        <textarea id="vocabulary" rows="3" placeholder="Names, jargon, project terms — comma or newline separated"></textarea>
+      </div>
+      <div class="row">
+        <label>System prompt</label>
+        <textarea id="cleanupPrompt" rows="14" spellcheck="false"></textarea>
+      </div>
+    </section>
+
+    <section data-pane="behavior">
+      <div class="row">
+        <label class="checkbox">
+          <input type="checkbox" id="showOverlay" />
+          <span>Show floating recording indicator</span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="checkbox">
+          <input type="checkbox" id="autoPaste" />
+          <span>Auto-paste cleaned text into focused field</span>
+        </label>
+        <p class="hint">When off, text is copied to the clipboard only.</p>
+      </div>
+      <div class="row">
+        <label>Paste delay (ms)</label>
+        <input type="number" id="pasteDelayMs" min="0" max="500" step="10" />
+        <p class="hint">Increase if paste sometimes lands in the wrong field.</p>
+      </div>
+      <hr />
+      <div class="row">
+        <button class="btn-ghost" id="resetAll">Reset all settings to defaults</button>
+      </div>
+    </section>
+
+    <section data-pane="license">
+      <div class="row">
+        <label>License key</label>
+        <div id="licKey" style="font-family: 'Cascadia Code', Consolas, monospace; font-size: 16px; color: var(--accent-hover); padding: 12px 0;">—</div>
+      </div>
+      <div class="grid-2">
+        <div class="row">
+          <label>Email</label>
+          <div id="licEmail" style="color: var(--text); font-size: 13.5px;">—</div>
+        </div>
+        <div class="row">
+          <label>Device</label>
+          <div id="licDevice" style="color: var(--text); font-size: 13.5px;">—</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Last verified</label>
+        <div id="licVerified" style="color: var(--text-mute); font-size: 13px;">—</div>
+      </div>
+      <hr />
+      <div class="row">
+        <p class="hint">Deactivating frees this license to be activated on a different device.</p>
+        <button class="btn-ghost" id="deactivateBtn" style="border-color: rgba(239, 68, 68, 0.5); color: #ef4444;">Deactivate this device</button>
+      </div>
+    </section>
+
+    <section data-pane="history">
+      <div class="row">
+        <p class="hint">Your last 50 dictations. Stored locally; not synced.</p>
+        <div id="historyList" class="history-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div id="toast" class="toast hidden"></div>
+    <div class="footer-buttons">
+      <button class="btn-ghost" id="cancelBtn">Close</button>
+      <button class="btn-primary" id="saveBtn">Save changes</button>
+    </div>
+  </footer>
+
+  <script src="settings.js"></script>
+</body>
+</html>
