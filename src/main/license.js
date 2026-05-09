@@ -155,8 +155,25 @@ function status() {
   };
 }
 
+function getEmbeddedKey() {
+  try {
+    return require('../../package.json').embeddedLicenseKey || null;
+  } catch {
+    return null;
+  }
+}
+
 async function ensureValid({ requireFresh = false } = {}) {
-  const record = load();
+  let record = load();
+
+  if (!record) {
+    const embedded = getEmbeddedKey();
+    if (embedded) {
+      const result = await activate(embedded).catch(() => null);
+      if (result && result.ok) record = result.record;
+    }
+  }
+
   if (!record) return { valid: false, reason: 'no_license' };
   if (!requireFresh && isFresh(record)) return { valid: true, record };
   const result = await verify();

@@ -1,0 +1,46 @@
+name: Build Owner Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      license_key:
+        description: 'License key to embed for auto-activation (e.g. WT-XXXX-XXXX-XXXX-XXXX)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Windows with embedded license
+        shell: pwsh
+        run: npm run dist -- --publish never --c.extraMetadata.embeddedLicenseKey="${{ github.event.inputs.license_key }}"
+
+      - name: List dist
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem dist | Format-Table
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WisperTalk-Windows-Owner-${{ github.run_number }}
+          path: |
+            dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
