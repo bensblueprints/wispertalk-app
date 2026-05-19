@@ -19,6 +19,8 @@ let state = 'idle';
 let busy = false;
 let licensed = false;
 let verifyTimer = null;
+let upgradeWin = null;
+const FREE_TRIAL_WORD_LIMIT = 2000;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -80,9 +82,12 @@ async function checkLicenseAndProceed() {
     }
   } else {
     licensed = false;
-    hotkey.unregister();
+    // Allow free trial — hotkeys stay active, usage is gated at FREE_TRIAL_WORD_LIMIT
+    applyHotkeys();
     rebuildTrayMenu();
-    openLicenseWindow();
+    if (!store.get('groqApiKey')) {
+      openSettings();
+    }
   }
 }
 
@@ -171,11 +176,17 @@ function rebuildTrayMenu() {
       { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
     );
   } else {
+    const wordCount = store.getMonthlyWordCount();
     items.push(
-      { label: 'License required', enabled: false },
+      { label: `Free trial: ${wordCount.toLocaleString()} / ${FREE_TRIAL_WORD_LIMIT.toLocaleString()} words`, enabled: false },
       { type: 'separator' },
+      { label: cfg.holdEnabled ? `Hold: ${cfg.holdHotkey}` : 'Hold: off', enabled: false },
+      { label: cfg.toggleEnabled ? `Toggle: ${cfg.toggleHotkey}` : 'Toggle: off', enabled: false },
+      { type: 'separator' },
+      { label: 'Settings…', click: () => openSettings() },
+      { label: 'Upgrade — $50 lifetime →', click: () => shell.openExternal(`${license.LICENSE_API}/#pricing`) },
       { label: 'Enter license key…', click: () => openLicenseWindow() },
-      { label: 'Buy a license', click: () => shell.openExternal(license.LICENSE_API) }
+      { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
     );
   }
 
@@ -200,10 +211,6 @@ function setBusy(next) {
 }
 
 function openSettings() {
-  if (!licensed) {
-    openLicenseWindow();
-    return;
-  }
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.show();
     settingsWin.focus();
@@ -256,14 +263,50 @@ function openLicenseWindow() {
   licenseWin.on('closed', () => { licenseWin = null; });
 }
 
+function openUpgradeWindow() {
+  if (upgradeWin && !upgradeWin.isDestroyed()) {
+    upgradeWin.show();
+    upgradeWin.focus();
+    return;
+  }
+  upgradeWin = new BrowserWindow({
+    width: 500,
+    height: 420,
+    title: 'Upgrade WisperTalk',
+    icon: ICON_PATH,
+    backgroundColor: '#06070d',
+    autoHideMenuBar: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'upgrade-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  upgradeWin.setMenuBarVisibility(false);
+  upgradeWin.loadFile(path.join(__dirname, '..', 'renderer', 'upgrade.html'));
+  upgradeWin.on('closed', () => { upgradeWin = null; });
+}
+
 function handleToggle() {
-  if (!licensed || busy) return;
+  if (busy) return;
+  if (!licensed && store.getMonthlyWordCount() >= FREE_TRIAL_WORD_LIMIT) {
+    openUpgradeWindow();
+    return;
+  }
   if (state === 'recording') stopRecording();
   else startRecording();
 }
 
 function handleHoldPress() {
-  if (!licensed || busy) return;
+  if (busy) return;
+  if (!licensed && store.getMonthlyWordCount() >= FREE_TRIAL_WORD_LIMIT) {
+    openUpgradeWindow();
+    return;
+  }
   if (state !== 'idle') return;
   startRecording();
 }
@@ -328,6 +371,18 @@ function registerIpc() {
   });
   ipcMain.handle('shell:open', (_e, url) => shell.openExternal(url));
   ipcMain.handle('app:quit', () => app.quit());
+  ipcMain.handle('upgrade:status', () => ({
+    wordCount: store.getMonthlyWordCount(),
+    limit: FREE_TRIAL_WORD_LIMIT,
+    buyUrl: `${license.LICENSE_API}/#pricing`
+  }));
+  ipcMain.handle('upgrade:open-license', () => {
+    if (upgradeWin && !upgradeWin.isDestroyed()) upgradeWin.close();
+    openLicenseWindow();
+  });
+  ipcMain.handle('upgrade:close', () => {
+    if (upgradeWin && !upgradeWin.isDestroyed()) upgradeWin.close();
+  });
 
   ipcMain.handle('settings:get', () => ({ ...store.getAll(), license: license.status() }));
   ipcMain.handle('settings:choices', () => ({
@@ -436,6 +491,12 @@ async function processAudio(buffer, mimeType) {
     final,
     context: contextHint
   });
+
+  if (!licensed) {
+    const words = final.trim().split(/\s+/).filter(Boolean).length;
+    store.addWords(words);
+    rebuildTrayMenu();
+  }
 
   if (cfg.autoPaste) {
     await pasteText(final, { delayMs: cfg.pasteDelayMs ?? 60 });
