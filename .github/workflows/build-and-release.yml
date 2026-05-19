@@ -49,16 +49,6 @@ jobs:
         if: always()
         run: ls -lh dist/ || true
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: WisperTalk-Mac-${{ needs.read-version.outputs.version }}
-          path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/latest-mac.yml
-            dist/*.blockmap
-          if-no-files-found: error
-
       - name: Publish Mac artifacts to public releases repo
         uses: softprops/action-gh-release@v2
         with:
@@ -66,9 +56,9 @@ jobs:
           repository: bensblueprints/wispertalk-releases
           tag_name: v${{ needs.read-version.outputs.version }}
           name: WisperTalk ${{ needs.read-version.outputs.version }}
-          draft: true
+          draft: false
           generate_release_notes: false
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           files: |
             dist/*.dmg
             dist/*.zip
@@ -100,15 +90,6 @@ jobs:
         shell: pwsh
         run: Get-ChildItem dist | Format-Table
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: WisperTalk-Windows-${{ needs.read-version.outputs.version }}
-          path: |
-            dist/*.exe
-            dist/latest.yml
-            dist/*.blockmap
-          if-no-files-found: error
-
       - name: Publish Windows artifacts to public releases repo
         uses: softprops/action-gh-release@v2
         with:
@@ -116,9 +97,9 @@ jobs:
           repository: bensblueprints/wispertalk-releases
           tag_name: v${{ needs.read-version.outputs.version }}
           name: WisperTalk ${{ needs.read-version.outputs.version }}
-          draft: true
+          draft: false
           generate_release_notes: false
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           files: |
             dist/*.exe
             dist/latest.yml
