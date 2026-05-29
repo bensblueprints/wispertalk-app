@@ -97,6 +97,7 @@ async function activate(rawKey, { force = false } = {}) {
     deviceName,
     email: json.email,
     token: json.token,
+    tier: json.tier || 'paid',
     lastVerifiedAt: Date.now()
   };
   save(record);
@@ -121,7 +122,7 @@ async function verify() {
     return { ok: false, error: json.error || `http_${res.status}` };
   }
 
-  const next = { ...record, token: json.token, lastVerifiedAt: Date.now() };
+  const next = { ...record, token: json.token, tier: json.tier || record.tier || 'paid', lastVerifiedAt: Date.now() };
   save(next);
   return { ok: true, record: next };
 }

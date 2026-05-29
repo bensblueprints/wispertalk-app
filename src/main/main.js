@@ -73,7 +73,7 @@ async function init() {
 async function checkLicenseAndProceed() {
   const result = await license.ensureValid().catch(() => ({ valid: false, reason: 'fetch_failed' }));
   if (result.valid) {
-    licensed = true;
+    licensed = result.record?.tier !== 'free';
     applyHotkeys();
     rebuildTrayMenu();
     schedulePeriodicVerify();
@@ -97,6 +97,7 @@ function schedulePeriodicVerify() {
     const r = await license.ensureValid({ requireFresh: true }).catch(() => ({ valid: false, reason: 'fetch_failed' }));
     if (!r.valid && r.reason !== 'fetch_failed') {
       licensed = false;
+
       hotkey.unregister();
       rebuildTrayMenu();
       openLicenseWindow();
@@ -184,7 +185,7 @@ function rebuildTrayMenu() {
       { label: cfg.toggleEnabled ? `Toggle: ${cfg.toggleHotkey}` : 'Toggle: off', enabled: false },
       { type: 'separator' },
       { label: 'Settings…', click: () => openSettings() },
-      { label: 'Upgrade — $50 lifetime →', click: () => shell.openExternal(`${license.LICENSE_API}/#pricing`) },
+      { label: 'Upgrade — $49.99 lifetime →', click: () => shell.openExternal('https://whop.com/checkout/plan_Oh4HMckTmxXcE') },
       { label: 'Enter license key…', click: () => openLicenseWindow() },
       { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
     );
@@ -346,10 +347,10 @@ function registerIpc() {
   ipcMain.handle('license:activate', async (_e, { key, force }) => {
     const res = await license.activate(key, { force }).catch((err) => ({ ok: false, error: 'fetch_failed', message: err.message }));
     if (res.ok) {
-      licensed = true;
+      licensed = res.record?.tier !== 'free';
       applyHotkeys();
       rebuildTrayMenu();
-      schedulePeriodicVerify();
+      if (licensed) schedulePeriodicVerify();
       if (licenseWin && !licenseWin.isDestroyed()) {
         licenseWin.close();
         licenseWin = null;
@@ -374,7 +375,7 @@ function registerIpc() {
   ipcMain.handle('upgrade:status', () => ({
     wordCount: store.getMonthlyWordCount(),
     limit: FREE_TRIAL_WORD_LIMIT,
-    buyUrl: `${license.LICENSE_API}/#pricing`
+    buyUrl: 'https://whop.com/checkout/plan_Oh4HMckTmxXcE'
   }));
   ipcMain.handle('upgrade:open-license', () => {
     if (upgradeWin && !upgradeWin.isDestroyed()) upgradeWin.close();
