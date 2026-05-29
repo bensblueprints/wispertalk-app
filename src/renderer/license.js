@@ -90,9 +90,10 @@ quitLink.addEventListener('click', (e) => {
 });
 
 input.addEventListener('input', () => {
-  const v = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (v.startsWith('WT')) {
-    const body = v.slice(2);
+  const stripped = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (stripped.startsWith('WT')) {
+    // WT-XXXX-XXXX-XXXX-XXXX — auto-format with dashes
+    const body = stripped.slice(2);
     let formatted = 'WT';
     for (let i = 0; i < Math.min(body.length, 16); i++) {
       if (i % 4 === 0) formatted += '-';
@@ -100,6 +101,7 @@ input.addEventListener('input', () => {
     }
     input.value = formatted;
   } else {
-    input.value = v;
+    // Whop / other format — preserve dashes, uppercase only, no truncation
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
   }
 });
