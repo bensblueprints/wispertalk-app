@@ -145,14 +145,15 @@ async function deactivate() {
 
 function status() {
   const record = load();
-  if (!record) return { hasLicense: false };
+  if (!record) return { hasLicense: false, tier: null };
   return {
     hasLicense: true,
     licenseKey: record.key,
     email: record.email,
     deviceName: record.deviceName,
     lastVerifiedAt: record.lastVerifiedAt,
-    fresh: isFresh(record)
+    fresh: isFresh(record),
+    tier: record.tier || 'paid'
   };
 }
 

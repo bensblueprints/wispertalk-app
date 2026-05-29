@@ -385,7 +385,11 @@ function registerIpc() {
     if (upgradeWin && !upgradeWin.isDestroyed()) upgradeWin.close();
   });
 
-  ipcMain.handle('settings:get', () => ({ ...store.getAll(), license: license.status() }));
+  ipcMain.handle('settings:get', () => ({
+    ...store.getAll(),
+    license: license.status(),
+    wordUsage: { count: store.getMonthlyWordCount(), limit: FREE_TRIAL_WORD_LIMIT }
+  }));
   ipcMain.handle('settings:choices', () => ({
     holdKeys: HOLD_KEY_CHOICES
   }));
