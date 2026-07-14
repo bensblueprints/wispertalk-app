@@ -320,7 +320,11 @@ function startRecording() {
   if (state === 'recording') return;
   setState('recording');
   if (store.get('showOverlay')) {
-    overlayWin.show();
+    // showInactive() — NOT show(). On macOS show() activates WisperTalk as the frontmost
+    // app, stealing keyboard focus from the text field the user is dictating into (they'd
+    // have to re-click it after every dictation). showInactive() displays the overlay
+    // without activating the app, so the target field keeps its focus and caret.
+    overlayWin.showInactive();
     overlayWin.webContents.send('overlay:show', { mode: 'recording' });
   }
   overlayWin.webContents.send('recorder:start', {
