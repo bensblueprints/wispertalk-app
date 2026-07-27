@@ -6,6 +6,13 @@ All notable changes to WisperTalk. Format follows [Keep a Changelog](https://kee
 
 See [`ROADMAP.md`](ROADMAP.md) for plans.
 
+## [1.1.1] — 2026-07-28
+
+### Fixed
+- **Owners of "OneTimeSuite Complete" were denied access** and stuck on the purchase-required dialog (which blocks startup, so the tray and Settings never appeared). v1.1.0 gated on the WisperTalk experience id alone, on the assumption that a bundle grant would resolve through it; it doesn't. All granting product ids are now checked explicitly (Lifetime, Complete, Additional Device, the experience, and the legacy product).
+- Access is now resolved authoritatively by the OneTimeSuite registry (`POST /access/check`), which matches the user's Whop memberships with the company key — bundle grants included. The per-experience user-token check remains as a fallback.
+- The denial dialog now names the Whop account that was signed in, so a wrong-account sign-in is obvious.
+
 ## [1.1.0] — 2026-07-28
 
 ### Changed

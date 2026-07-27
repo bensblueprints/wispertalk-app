@@ -101,7 +101,7 @@ async function loginWithWhop(cfg, openUrl) {
   const uiRes = await fetch(`${OAUTH_BASE}/userinfo`, { headers: { Authorization: `Bearer ${tokens.access_token}` } });
   const userInfo = await uiRes.json();
   if (!uiRes.ok || !userInfo.sub) throw new Error('Whop userinfo failed: ' + JSON.stringify(userInfo).slice(0, 200));
-  return { userId: userInfo.sub, tokens };
+  return { userId: userInfo.sub, tokens, email: userInfo.email || userInfo.username || null };
 }
 
 async function refreshTokens(cfg, refreshToken) {
@@ -116,20 +116,43 @@ async function refreshTokens(cfg, refreshToken) {
   return j;
 }
 
+/* Authoritative check: ask the registry, which resolves memberships with the
+ * company key. Catches access granted through a bundle (OneTimeSuite Complete),
+ * which the per-experience user-token endpoint misses. Returns null if the
+ * registry can't answer, so the caller falls back to the direct check. */
+async function checkAccessViaRegistry(cfg, accessToken) {
+  try {
+    const res = await fetch(`${REGISTRY_BASE}/access/check`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_ids: cfg.experienceIds }),
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (typeof j.hasAccess !== 'boolean') return null;
+    return { hasAccess: j.hasAccess, accessLevel: j.hasAccess ? 'customer' : 'no_access', grantedId: j.productId };
+  } catch {
+    return null;
+  }
+}
+
 /* Check the signed-in user's own access with their own token — any id grants. */
 async function checkAccess(cfg, accessToken, userId) {
+  const viaRegistry = await checkAccessViaRegistry(cfg, accessToken);
+  if (viaRegistry && viaRegistry.hasAccess) return viaRegistry;
+
   let authExpired = false;
   for (const id of cfg.experienceIds) {
     const res = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/access/${id}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (res.status === 401) { authExpired = true; continue; }
-    if (res.status === 403) continue;
-    if (!res.ok) throw new Error(`access check HTTP ${res.status}`);
-    const j = await res.json();
+    if (res.status === 403 || res.status === 404) continue;
+    if (!res.ok) continue;
+    const j = await res.json().catch(() => ({}));
     if (j.has_access) return { hasAccess: true, accessLevel: j.access_level || 'customer', grantedId: id };
   }
-  return { hasAccess: false, accessLevel: 'no_access', authExpired };
+  return { hasAccess: false, accessLevel: 'no_access', authExpired, checkedIds: cfg.experienceIds.length };
 }
 
 /* ---------- central device registry (desktop apps only) ---------- */
@@ -180,9 +203,14 @@ async function ensureLicensed({ stateDir, openUrl, config }) {
   let state = loadState(stateFile);
 
   if (!state || state.deviceHash !== deviceFingerprint()) {
-    const { userId, tokens } = await loginWithWhop(cfg, openUrl);
+    const { userId, tokens, email } = await loginWithWhop(cfg, openUrl);
     const access = await checkAccess(cfg, tokens.access_token, userId);
-    if (!access.hasAccess) { const e = new Error(`No active ${cfg.appName} license on this Whop account.`); e.code = 'NO_LICENSE'; throw e; }
+    if (!access.hasAccess) {
+      const who = email ? ` (${email})` : '';
+      const e = new Error(`No ${cfg.appName} purchase found on the Whop account you signed in with${who}.\n\nIf you bought with a different Whop account, sign out at whop.com and try again with that one.`);
+      e.code = 'NO_LICENSE';
+      throw e;
+    }
     // enforce the device cap via the central registry (fail-open if unreachable)
     const reg = await registerDevice(cfg, tokens.access_token, deviceFingerprint()).catch(() => ({ limitReached: false }));
     if (reg.limitReached) {
