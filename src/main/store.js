@@ -33,9 +33,7 @@ Output rules:
   playSounds: true,
   autoPaste: true,
   pasteDelayMs: 60,
-  history: [],
-  monthlyWordCount: 0,
-  usageMonth: ''
+  history: []
 };
 
 const HISTORY_LIMIT = 50;
@@ -97,33 +95,4 @@ function pushHistory(item) {
   save();
 }
 
-function getCurrentMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function resetUsageIfNewMonth() {
-  load();
-  const current = getCurrentMonth();
-  if (cache.usageMonth !== current) {
-    cache.monthlyWordCount = 0;
-    cache.usageMonth = current;
-    save();
-  }
-}
-
-function addWords(count) {
-  load();
-  resetUsageIfNewMonth();
-  cache.monthlyWordCount = (cache.monthlyWordCount || 0) + count;
-  save();
-  return cache.monthlyWordCount;
-}
-
-function getMonthlyWordCount() {
-  load();
-  resetUsageIfNewMonth();
-  return cache.monthlyWordCount || 0;
-}
-
-module.exports = { get, getAll, set, reset, pushHistory, addWords, getMonthlyWordCount, DEFAULTS };
+module.exports = { get, getAll, set, reset, pushHistory, DEFAULTS };

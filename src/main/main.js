@@ -19,8 +19,7 @@ let state = 'idle';
 let busy = false;
 let licensed = false;
 let verifyTimer = null;
-let upgradeWin = null;
-const FREE_TRIAL_WORD_LIMIT = 2000;
+const BUY_URL = 'https://whop.com/checkout/plan_Oh4HMckTmxXcE';
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -72,8 +71,8 @@ async function init() {
 
 async function checkLicenseAndProceed() {
   const result = await license.ensureValid().catch(() => ({ valid: false, reason: 'fetch_failed' }));
-  if (result.valid) {
-    licensed = result.record?.tier !== 'free';
+  if (result.valid && result.record?.tier !== 'free') {
+    licensed = true;
     applyHotkeys();
     rebuildTrayMenu();
     schedulePeriodicVerify();
@@ -82,12 +81,8 @@ async function checkLicenseAndProceed() {
     }
   } else {
     licensed = false;
-    // Allow free trial — hotkeys stay active, usage is gated at FREE_TRIAL_WORD_LIMIT
-    applyHotkeys();
     rebuildTrayMenu();
-    if (!store.get('groqApiKey')) {
-      openSettings();
-    }
+    openLicenseWindow();
   }
 }
 
@@ -95,7 +90,7 @@ function schedulePeriodicVerify() {
   if (verifyTimer) clearInterval(verifyTimer);
   verifyTimer = setInterval(async () => {
     const r = await license.ensureValid({ requireFresh: true }).catch(() => ({ valid: false, reason: 'fetch_failed' }));
-    if (!r.valid && r.reason !== 'fetch_failed') {
+    if ((!r.valid && r.reason !== 'fetch_failed') || (r.valid && r.record?.tier === 'free')) {
       licensed = false;
 
       hotkey.unregister();
@@ -177,16 +172,12 @@ function rebuildTrayMenu() {
       { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
     );
   } else {
-    const wordCount = store.getMonthlyWordCount();
     items.push(
-      { label: `Free trial: ${wordCount.toLocaleString()} / ${FREE_TRIAL_WORD_LIMIT.toLocaleString()} words`, enabled: false },
+      { label: 'Not activated — license required', enabled: false },
       { type: 'separator' },
-      { label: cfg.holdEnabled ? `Hold: ${cfg.holdHotkey}` : 'Hold: off', enabled: false },
-      { label: cfg.toggleEnabled ? `Toggle: ${cfg.toggleHotkey}` : 'Toggle: off', enabled: false },
-      { type: 'separator' },
-      { label: 'Settings…', click: () => openSettings() },
-      { label: 'Upgrade — $49.99 lifetime →', click: () => shell.openExternal('https://whop.com/checkout/plan_Oh4HMckTmxXcE') },
+      { label: 'Buy — $49.99 lifetime →', click: () => shell.openExternal(BUY_URL) },
       { label: 'Enter license key…', click: () => openLicenseWindow() },
+      { label: 'Settings…', click: () => openSettings() },
       { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
     );
   }
@@ -264,38 +255,10 @@ function openLicenseWindow() {
   licenseWin.on('closed', () => { licenseWin = null; });
 }
 
-function openUpgradeWindow() {
-  if (upgradeWin && !upgradeWin.isDestroyed()) {
-    upgradeWin.show();
-    upgradeWin.focus();
-    return;
-  }
-  upgradeWin = new BrowserWindow({
-    width: 500,
-    height: 420,
-    title: 'Upgrade WisperTalk',
-    icon: ICON_PATH,
-    backgroundColor: '#06070d',
-    autoHideMenuBar: true,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'upgrade-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-  upgradeWin.setMenuBarVisibility(false);
-  upgradeWin.loadFile(path.join(__dirname, '..', 'renderer', 'upgrade.html'));
-  upgradeWin.on('closed', () => { upgradeWin = null; });
-}
-
 function handleToggle() {
   if (busy) return;
-  if (!licensed && store.getMonthlyWordCount() >= FREE_TRIAL_WORD_LIMIT) {
-    openUpgradeWindow();
+  if (!licensed) {
+    openLicenseWindow();
     return;
   }
   if (state === 'recording') stopRecording();
@@ -304,8 +267,8 @@ function handleToggle() {
 
 function handleHoldPress() {
   if (busy) return;
-  if (!licensed && store.getMonthlyWordCount() >= FREE_TRIAL_WORD_LIMIT) {
-    openUpgradeWindow();
+  if (!licensed) {
+    openLicenseWindow();
     return;
   }
   if (state !== 'idle') return;
@@ -350,11 +313,14 @@ function hideOverlay() {
 function registerIpc() {
   ipcMain.handle('license:activate', async (_e, { key, force }) => {
     const res = await license.activate(key, { force }).catch((err) => ({ ok: false, error: 'fetch_failed', message: err.message }));
+    if (res.ok && res.record?.tier === 'free') {
+      return { ok: false, error: 'not_purchased', message: 'This key is not attached to a purchase. Buy WisperTalk to activate.' };
+    }
     if (res.ok) {
-      licensed = res.record?.tier !== 'free';
+      licensed = true;
       applyHotkeys();
       rebuildTrayMenu();
-      if (licensed) schedulePeriodicVerify();
+      schedulePeriodicVerify();
       if (licenseWin && !licenseWin.isDestroyed()) {
         licenseWin.close();
         licenseWin = null;
@@ -376,23 +342,10 @@ function registerIpc() {
   });
   ipcMain.handle('shell:open', (_e, url) => shell.openExternal(url));
   ipcMain.handle('app:quit', () => app.quit());
-  ipcMain.handle('upgrade:status', () => ({
-    wordCount: store.getMonthlyWordCount(),
-    limit: FREE_TRIAL_WORD_LIMIT,
-    buyUrl: 'https://whop.com/checkout/plan_Oh4HMckTmxXcE'
-  }));
-  ipcMain.handle('upgrade:open-license', () => {
-    if (upgradeWin && !upgradeWin.isDestroyed()) upgradeWin.close();
-    openLicenseWindow();
-  });
-  ipcMain.handle('upgrade:close', () => {
-    if (upgradeWin && !upgradeWin.isDestroyed()) upgradeWin.close();
-  });
 
   ipcMain.handle('settings:get', () => ({
     ...store.getAll(),
-    license: license.status(),
-    wordUsage: { count: store.getMonthlyWordCount(), limit: FREE_TRIAL_WORD_LIMIT }
+    license: license.status()
   }));
   ipcMain.handle('settings:choices', () => ({
     holdKeys: HOLD_KEY_CHOICES
@@ -500,12 +453,6 @@ async function processAudio(buffer, mimeType) {
     final,
     context: contextHint
   });
-
-  if (!licensed) {
-    const words = final.trim().split(/\s+/).filter(Boolean).length;
-    store.addWords(words);
-    rebuildTrayMenu();
-  }
 
   if (cfg.autoPaste) {
     await pasteText(final, { delayMs: cfg.pasteDelayMs ?? 60 });

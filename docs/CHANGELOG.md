@@ -4,7 +4,13 @@ All notable changes to WisperTalk. Format follows [Keep a Changelog](https://kee
 
 ## [Unreleased]
 
-See [`ROADMAP.md`](ROADMAP.md) for v0.3.0 plans.
+See [`ROADMAP.md`](ROADMAP.md) for plans.
+
+## [1.1.0] — 2026-07-28
+
+### Removed
+- **2,000-word/month free trial.** The app now requires a valid purchased license (bought via Whop, validated server-side) before dictation works. On launch without a license the activation window opens and hotkeys stay unregistered. Free-tier Whop keys no longer activate — activation returns `not_purchased` with a buy prompt.
+- Upgrade prompt window (`upgrade.html`), monthly word counting in the local store, and the trial word counter in Settings and the tray menu.
 
 ## [0.2.2] — 2026-05-10
 

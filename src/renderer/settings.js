@@ -49,33 +49,14 @@ function el(id) { return document.getElementById(id); }
 
 function setStatus(text) { el('status').textContent = text; }
 
-function renderWordCounter(license, wordUsage) {
+function renderWordCounter(license) {
   const wrap = el('wordCounter');
   wrap.innerHTML = '';
   const isPaid = license?.hasLicense && license?.tier !== 'free';
 
   const badge = document.createElement('div');
   badge.className = `word-counter-badge ${isPaid ? 'paid' : 'free'}`;
-
-  if (isPaid) {
-    badge.innerHTML = '✦ Unlimited';
-  } else {
-    const count = wordUsage?.count ?? 0;
-    const limit = wordUsage?.limit ?? 2000;
-    badge.textContent = `${count.toLocaleString()} / ${limit.toLocaleString()} words`;
-
-    const barWrap = document.createElement('div');
-    barWrap.className = 'word-counter-bar';
-    const fill = document.createElement('div');
-    const pct = Math.min(100, Math.round((count / limit) * 100));
-    fill.className = 'word-counter-bar-fill' +
-      (pct >= 100 ? ' at-limit' : pct >= 80 ? ' near-limit' : '');
-    fill.style.width = `${pct}%`;
-    barWrap.appendChild(fill);
-    wrap.appendChild(badge);
-    wrap.appendChild(barWrap);
-    return;
-  }
+  badge.textContent = isPaid ? '✦ Licensed' : 'Not activated';
   wrap.appendChild(badge);
 }
 
@@ -205,7 +186,7 @@ async function init() {
   await populateMics({ saved: cfg.inputDeviceId });
 
   writeAll(cfg);
-  renderWordCounter(cfg.license, cfg.wordUsage);
+  renderWordCounter(cfg.license);
   setStatus('');
 
   for (const k of fields) {
