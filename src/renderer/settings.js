@@ -215,7 +215,7 @@ async function init() {
   });
 
   el('deactivateBtn').addEventListener('click', async () => {
-    if (!confirm('Deactivate this device? You will need to enter your license key again to use WisperTalk on this computer.')) return;
+    if (!confirm('Sign out on this computer? You will need to enter your purchase email again to use WisperTalk.')) return;
     await window.flow.deactivateLicense();
   });
 
@@ -260,7 +260,6 @@ async function save() {
 
 async function loadLicense() {
   const lic = await window.flow.getLicense();
-  el('licKey').textContent = lic.licenseKey || '—';
   el('licEmail').textContent = lic.email || '—';
   el('licDevice').textContent = lic.deviceName || '—';
   el('licVerified').textContent = lic.lastVerifiedAt ? new Date(lic.lastVerifiedAt).toLocaleString() : '—';

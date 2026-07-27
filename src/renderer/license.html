@@ -11,46 +11,35 @@
       <div class="brand">
         <div class="logo"></div>
         <div>
-          <div class="title"><em>Whisper</em> Talk</div>
-          <div class="subtitle">Voice dictation for Windows</div>
+          <div class="title"><em>Wisper</em>Talk</div>
+          <div class="subtitle">Voice dictation for Windows &amp; Mac</div>
         </div>
       </div>
     </header>
 
     <section class="hero">
-      <h1>Activate your <em>license</em>.</h1>
+      <h1>Confirm your <em>purchase</em>.</h1>
       <p class="lede">
-        Enter the license key from your purchase email. One key works on one device at a time —
-        you can move it whenever you want from the Settings panel.
+        Enter the email you used when buying WisperTalk on Whop.
+        We'll check your purchase and unlock the app — no license key needed.
       </p>
 
       <form id="form">
-        <label>License key</label>
+        <label>Purchase email</label>
         <input
           id="key"
-          type="text"
-          autocomplete="off"
+          type="email"
+          autocomplete="email"
           spellcheck="false"
-          placeholder="WT-XXXX-XXXX-XXXX-XXXX"
+          placeholder="you@example.com"
           autofocus
         />
         <div id="error" class="error hidden"></div>
-        <div id="conflict" class="conflict hidden">
-          <div class="conflict-title">Already active on another device</div>
-          <div class="conflict-body">
-            This license is currently bound to <strong id="conflict-device">a device</strong>.
-            Move it to this computer? The other device will be deactivated immediately.
-          </div>
-          <div class="conflict-actions">
-            <button type="button" id="cancelMove" class="btn-ghost">Cancel</button>
-            <button type="button" id="confirmMove" class="btn-primary">Move license here</button>
-          </div>
-        </div>
-        <button type="submit" id="submit" class="btn-primary">Activate</button>
+        <button type="submit" id="submit" class="btn-primary">Unlock WisperTalk</button>
       </form>
 
       <div class="meta">
-        <a href="#" id="buy">Need a license? Buy one at wispertalk.com →</a>
+        <a href="#" id="buy">Haven't bought yet? Get WisperTalk — $49.99 lifetime →</a>
         <a href="#" id="quit" class="quit">Quit</a>
       </div>
     </section>

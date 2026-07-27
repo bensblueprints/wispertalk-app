@@ -166,7 +166,7 @@ function rebuildTrayMenu() {
       { label: cfg.holdEnabled ? `Hold: ${cfg.holdHotkey}` : 'Hold: off', enabled: false },
       { label: cfg.toggleEnabled ? `Toggle: ${cfg.toggleHotkey}` : 'Toggle: off', enabled: false },
       { type: 'separator' },
-      { label: `Licensed: ${licStatus.licenseKey || ''}`, enabled: false },
+      { label: `Licensed: ${licStatus.email || ''}`, enabled: false },
       { type: 'separator' },
       { label: 'Settings…', click: () => openSettings() },
       { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
@@ -176,7 +176,7 @@ function rebuildTrayMenu() {
       { label: 'Not activated — license required', enabled: false },
       { type: 'separator' },
       { label: 'Buy — $49.99 lifetime →', click: () => shell.openExternal(BUY_URL) },
-      { label: 'Enter license key…', click: () => openLicenseWindow() },
+      { label: 'Unlock with purchase email…', click: () => openLicenseWindow() },
       { label: 'Settings…', click: () => openSettings() },
       { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
     );
@@ -311,10 +311,10 @@ function hideOverlay() {
 }
 
 function registerIpc() {
-  ipcMain.handle('license:activate', async (_e, { key, force }) => {
-    const res = await license.activate(key, { force }).catch((err) => ({ ok: false, error: 'fetch_failed', message: err.message }));
+  ipcMain.handle('license:activate', async (_e, { email }) => {
+    const res = await license.activate(email).catch((err) => ({ ok: false, error: 'fetch_failed', message: err.message }));
     if (res.ok && res.record?.tier === 'free') {
-      return { ok: false, error: 'not_purchased', message: 'This key is not attached to a purchase. Buy WisperTalk to activate.' };
+      return { ok: false, error: 'not_purchased', message: 'No purchase is attached to this email. Buy WisperTalk to unlock.' };
     }
     if (res.ok) {
       licensed = true;
@@ -330,7 +330,7 @@ function registerIpc() {
     return res;
   });
   ipcMain.handle('license:status', () => license.status());
-  ipcMain.handle('license:buy-url', () => license.LICENSE_API);
+  ipcMain.handle('license:buy-url', () => BUY_URL);
   ipcMain.handle('license:deactivate', async () => {
     const res = await license.deactivate();
     licensed = false;

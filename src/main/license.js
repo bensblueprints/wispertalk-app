@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { randomUUID, randomBytes } = require('node:crypto');
+const { randomBytes } = require('node:crypto');
 const { app } = require('electron');
 
 const LICENSE_API = process.env.WISPERTALK_LICENSE_API || process.env.WHISPER_TALK_LICENSE_API || 'https://wispertalk.com';
@@ -77,25 +77,25 @@ function isFresh(record) {
   return Date.now() - record.lastVerifiedAt < VERIFY_INTERVAL_MS;
 }
 
-async function activate(rawKey, { force = false } = {}) {
+// Verify a Whop purchase by the email it was bought with. No license keys.
+async function activate(email) {
   const deviceId = getDeviceId();
   const deviceName = getDeviceName();
-  const res = await fetch(`${LICENSE_API}/api/license/activate`, {
+  const res = await fetch(`${LICENSE_API}/api/purchase/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: rawKey, deviceId, deviceName, force })
+    body: JSON.stringify({ email: String(email).trim(), deviceId, deviceName })
   });
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json.ok) {
-    return { ok: false, error: json.error || `http_${res.status}`, message: json.message, boundDeviceName: json.boundDeviceName };
+    return { ok: false, error: json.error || `http_${res.status}`, message: json.message };
   }
 
   const record = {
-    key: json.licenseKey,
+    email: json.email,
     deviceId,
     deviceName,
-    email: json.email,
     token: json.token,
     tier: json.tier || 'paid',
     lastVerifiedAt: Date.now()
@@ -106,17 +106,17 @@ async function activate(rawKey, { force = false } = {}) {
 
 async function verify() {
   const record = load();
-  if (!record) return { ok: false, error: 'no_license' };
+  if (!record || !record.email) return { ok: false, error: 'no_license' };
 
-  const res = await fetch(`${LICENSE_API}/api/license/verify`, {
+  const res = await fetch(`${LICENSE_API}/api/purchase/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: record.key, deviceId: record.deviceId })
+    body: JSON.stringify({ email: record.email, deviceId: record.deviceId, deviceName: record.deviceName })
   });
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json.ok) {
-    if (json.error === 'device_mismatch' || json.error === 'invalid_key' || json.error === 'license_refunded') {
+    if (json.error === 'not_found' || json.error === 'license_refunded') {
       clear();
     }
     return { ok: false, error: json.error || `http_${res.status}` };
@@ -128,17 +128,6 @@ async function verify() {
 }
 
 async function deactivate() {
-  const record = load();
-  if (!record) return { ok: true };
-  try {
-    await fetch(`${LICENSE_API}/api/license/deactivate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: record.key, deviceId: record.deviceId })
-    });
-  } catch (err) {
-    console.warn('deactivate request failed:', err.message);
-  }
   clear();
   return { ok: true };
 }
@@ -148,7 +137,6 @@ function status() {
   if (!record) return { hasLicense: false, tier: null };
   return {
     hasLicense: true,
-    licenseKey: record.key,
     email: record.email,
     deviceName: record.deviceName,
     lastVerifiedAt: record.lastVerifiedAt,
@@ -157,6 +145,8 @@ function status() {
   };
 }
 
+// Owner builds bake the purchase email into package.json (embeddedLicenseKey
+// kept as the field name for CI compatibility) so first launch auto-activates.
 function getEmbeddedKey() {
   try {
     return require('../../package.json').embeddedLicenseKey || null;
@@ -170,7 +160,7 @@ async function ensureValid({ requireFresh = false } = {}) {
 
   if (!record) {
     const embedded = getEmbeddedKey();
-    if (embedded) {
+    if (embedded && embedded.includes('@')) {
       const result = await activate(embedded).catch(() => null);
       if (result && result.ok) record = result.record;
     }

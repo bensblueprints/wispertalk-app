@@ -8,9 +8,12 @@ See [`ROADMAP.md`](ROADMAP.md) for plans.
 
 ## [1.1.0] — 2026-07-28
 
+### Changed
+- **License keys are gone.** The app now unlocks with the email used to purchase on Whop: the activation window asks for the purchase email, the server (`/api/purchase/verify`) confirms an active purchase, and the app unlocks. Existing installs with an old key-based `license.json` migrate automatically — periodic re-verify uses the stored email. Multi-device is allowed; "Deactivate this device" is now "Sign out".
+
 ### Removed
-- **2,000-word/month free trial.** The app now requires a valid purchased license (bought via Whop, validated server-side) before dictation works. On launch without a license the activation window opens and hotkeys stay unregistered. Free-tier Whop keys no longer activate — activation returns `not_purchased` with a buy prompt.
-- Upgrade prompt window (`upgrade.html`), monthly word counting in the local store, and the trial word counter in Settings and the tray menu.
+- **2,000-word/month free trial.** Without a verified purchase the activation window opens at launch and hotkeys stay unregistered. Whop free-tier memberships don't count as purchases.
+- Upgrade prompt window (`upgrade.html`), monthly word counting in the local store, the trial word counter in Settings and the tray menu, and the license-key input/conflict-resolution UI.
 
 ## [0.2.2] — 2026-05-10
 
