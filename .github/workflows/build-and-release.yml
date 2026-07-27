@@ -66,7 +66,10 @@ jobs:
 
   build-windows:
     needs: read-version
-    runs-on: windows-latest
+    # Pinned: windows-latest now resolves to the vs2026 image, where the
+    # node-gyp bundled in our dependency tree can't find Visual Studio
+    # (uiohook-napi rebuild fails). windows-2022 has VS2022, which it detects.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
