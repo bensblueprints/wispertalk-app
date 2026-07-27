@@ -6,6 +6,12 @@ All notable changes to WisperTalk. Format follows [Keep a Changelog](https://kee
 
 See [`ROADMAP.md`](ROADMAP.md) for plans.
 
+## [1.1.3] — 2026-07-28
+
+### Fixed
+- **"client secret is required" at sign-in.** The cause was the OAuth client id, not the flow: `app_B2TMUEvC9aRUNZ` is a confidential, API-created app that demands a secret. The suite's `DESKTOP-BUILD-GUIDE.md` names `app_1alGIvT167sGCl` (public client, loopback redirect registered) as the one to use — both verified healthy with the guide's own probes. Token exchange is back to plain public PKCE with no secret anywhere, matching the canonical module.
+- Owner accounts (`OWNER_USER_IDS`) short-circuit the access check, per the same guide.
+
 ## [1.1.2] — 2026-07-28
 
 ### Fixed
