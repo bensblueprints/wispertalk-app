@@ -1,6 +1,6 @@
 {
   "name": "wispertalk",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "WisperTalk — voice dictation. $49.99 lifetime.",
   "main": "src/main/main.js",
   "author": {

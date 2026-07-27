@@ -6,6 +6,14 @@ All notable changes to WisperTalk. Format follows [Keep a Changelog](https://kee
 
 See [`ROADMAP.md`](ROADMAP.md) for plans.
 
+## [1.1.2] — 2026-07-28
+
+### Fixed
+- **Sign-in failed with "client secret is required."** Whop treats the OneTimeSuite OAuth app as a confidential client, so the code exchange needs a client_secret — which must never ship inside the app. The exchange (and token refresh) now goes through the registry's `/oauth/token` and `/oauth/refresh` proxy, which holds the secret server-side, and the client id now matches the one that proxy is configured with (`app_1alGIvT167sGCl`).
+- Sign-in errors now surface Whop's actual message instead of a generic failure.
+
+> Note for other OneTimeSuite apps: the canonical `client/whop-license.js` still exchanges directly with Whop and will hit this same error. It should be updated to use the proxy the same way.
+
 ## [1.1.1] — 2026-07-28
 
 ### Fixed

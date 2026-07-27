@@ -89,14 +89,17 @@ async function loginWithWhop(cfg, openUrl) {
     setTimeout(() => { try { srv.close(); } catch {} ; reject(new Error('Sign-in timed out (5 minutes)')); }, 5 * 60 * 1000).unref();
   });
 
-  const body = { grant_type: 'authorization_code', client_id: cfg.clientId, code, redirect_uri: redirectUri, code_verifier: verifier };
-  if (cfg.clientSecret) body.client_secret = cfg.clientSecret;
-  const tokRes = await fetch(`${OAUTH_BASE}/token`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(body),
+  // Whop treats this OAuth app as a confidential client, so the exchange needs
+  // a client_secret — which must never ship in the binary. The registry holds
+  // it and proxies the exchange for us.
+  const tokRes = await fetch(`${REGISTRY_BASE}/oauth/token`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, code_verifier: verifier, redirect_uri: redirectUri }),
   });
-  const tokens = await tokRes.json();
-  if (!tokRes.ok || !tokens.access_token) throw new Error('Whop token exchange failed: ' + JSON.stringify(tokens).slice(0, 200));
+  const tokens = await tokRes.json().catch(() => ({}));
+  if (!tokRes.ok || !tokens.access_token) {
+    throw new Error('Whop sign-in could not be completed: ' + (tokens.error_description || tokens.error || `HTTP ${tokRes.status}`));
+  }
 
   const uiRes = await fetch(`${OAUTH_BASE}/userinfo`, { headers: { Authorization: `Bearer ${tokens.access_token}` } });
   const userInfo = await uiRes.json();
@@ -105,13 +108,11 @@ async function loginWithWhop(cfg, openUrl) {
 }
 
 async function refreshTokens(cfg, refreshToken) {
-  const body = { grant_type: 'refresh_token', client_id: cfg.clientId, refresh_token: refreshToken };
-  if (cfg.clientSecret) body.client_secret = cfg.clientSecret;
-  const res = await fetch(`${OAUTH_BASE}/token`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(body),
+  const res = await fetch(`${REGISTRY_BASE}/oauth/refresh`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken }),
   });
-  const j = await res.json();
+  const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.access_token) throw new Error('refresh failed');
   return j;
 }
