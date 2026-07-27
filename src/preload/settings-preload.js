@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('flow', {
   closeWindow: () => ipcRenderer.invoke('settings:close'),
   getHistory: () => ipcRenderer.invoke('history:list'),
   getLicense: () => ipcRenderer.invoke('license:status'),
-  deactivateLicense: () => ipcRenderer.invoke('license:deactivate'),
+  deactivateLicense: () => ipcRenderer.invoke('license:deactivateThisDevice'),
+  quitApp: () => ipcRenderer.invoke('app:quit'),
   onToast: (cb) => ipcRenderer.on('toast', (_e, p) => cb(p))
 });

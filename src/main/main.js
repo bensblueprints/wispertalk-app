@@ -6,20 +6,16 @@ const { transcribe } = require('./transcribe');
 const { cleanup } = require('./postprocess');
 const { pasteText } = require('./paste');
 const { getForegroundContext } = require('./context');
-const license = require('./license');
+const { gateLicense, registerLicenseIpc } = require('./license-gate');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-128.png');
 
 let tray = null;
 let overlayWin = null;
 let settingsWin = null;
-let licenseWin = null;
 let hotkey = null;
 let state = 'idle';
 let busy = false;
-let licensed = false;
-let verifyTimer = null;
-const BUY_URL = 'https://whop.com/checkout/plan_Oh4HMckTmxXcE';
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -40,6 +36,10 @@ app.on('before-quit', () => {
 
 async function init() {
   app.setAppUserModelId('com.wispertalk.app');
+
+  // Whop purchase gate — "Sign in with Whop" verifies the purchase; no keys.
+  if (!(await gateLicense())) return; // quit already requested
+  registerLicenseIpc();
 
   // On macOS, show a one-time notice about Accessibility permission needed for paste + global hotkeys.
   if (process.platform === 'darwin' && !store.get('macAccessibilityNoticeShown')) {
@@ -65,39 +65,11 @@ async function init() {
   });
 
   registerIpc();
+  applyHotkeys();
 
-  await checkLicenseAndProceed();
-}
-
-async function checkLicenseAndProceed() {
-  const result = await license.ensureValid().catch(() => ({ valid: false, reason: 'fetch_failed' }));
-  if (result.valid && result.record?.tier !== 'free') {
-    licensed = true;
-    applyHotkeys();
-    rebuildTrayMenu();
-    schedulePeriodicVerify();
-    if (!store.get('groqApiKey')) {
-      openSettings();
-    }
-  } else {
-    licensed = false;
-    rebuildTrayMenu();
-    openLicenseWindow();
+  if (!store.get('groqApiKey')) {
+    openSettings();
   }
-}
-
-function schedulePeriodicVerify() {
-  if (verifyTimer) clearInterval(verifyTimer);
-  verifyTimer = setInterval(async () => {
-    const r = await license.ensureValid({ requireFresh: true }).catch(() => ({ valid: false, reason: 'fetch_failed' }));
-    if ((!r.valid && r.reason !== 'fetch_failed') || (r.valid && r.record?.tier === 'free')) {
-      licensed = false;
-
-      hotkey.unregister();
-      rebuildTrayMenu();
-      openLicenseWindow();
-    }
-  }, 6 * 60 * 60 * 1000);
 }
 
 function applyHotkeys() {
@@ -156,33 +128,20 @@ function createTray() {
 
 function rebuildTrayMenu() {
   const cfg = store.getAll();
-  const licStatus = license.status();
 
-  const items = [{ label: `WisperTalk — ${labelForState()}`, enabled: false }];
-  items.push({ type: 'separator' });
-
-  if (licensed && licStatus.hasLicense) {
-    items.push(
-      { label: cfg.holdEnabled ? `Hold: ${cfg.holdHotkey}` : 'Hold: off', enabled: false },
-      { label: cfg.toggleEnabled ? `Toggle: ${cfg.toggleHotkey}` : 'Toggle: off', enabled: false },
-      { type: 'separator' },
-      { label: `Licensed: ${licStatus.email || ''}`, enabled: false },
-      { type: 'separator' },
-      { label: 'Settings…', click: () => openSettings() },
-      { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
-    );
-  } else {
-    items.push(
-      { label: 'Not activated — license required', enabled: false },
-      { type: 'separator' },
-      { label: 'Buy — $49.99 lifetime →', click: () => shell.openExternal(BUY_URL) },
-      { label: 'Unlock with purchase email…', click: () => openLicenseWindow() },
-      { label: 'Settings…', click: () => openSettings() },
-      { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) }
-    );
-  }
-
-  items.push({ type: 'separator' }, { label: 'Quit WisperTalk', click: () => app.quit() });
+  const items = [
+    { label: `WisperTalk — ${labelForState()}`, enabled: false },
+    { type: 'separator' },
+    { label: cfg.holdEnabled ? `Hold: ${cfg.holdHotkey}` : 'Hold: off', enabled: false },
+    { label: cfg.toggleEnabled ? `Toggle: ${cfg.toggleHotkey}` : 'Toggle: off', enabled: false },
+    { type: 'separator' },
+    { label: 'Licensed via Whop', enabled: false },
+    { type: 'separator' },
+    { label: 'Settings…', click: () => openSettings() },
+    { label: 'Open log folder', click: () => shell.openPath(app.getPath('userData')) },
+    { type: 'separator' },
+    { label: 'Quit WisperTalk', click: () => app.quit() }
+  ];
   tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 
@@ -227,50 +186,14 @@ function openSettings() {
   settingsWin.on('closed', () => { settingsWin = null; });
 }
 
-function openLicenseWindow() {
-  if (licenseWin && !licenseWin.isDestroyed()) {
-    licenseWin.show();
-    licenseWin.focus();
-    return;
-  }
-  licenseWin = new BrowserWindow({
-    width: 600,
-    height: 640,
-    title: 'Activate WisperTalk',
-    icon: ICON_PATH,
-    backgroundColor: '#06070d',
-    autoHideMenuBar: true,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'license-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-  licenseWin.setMenuBarVisibility(false);
-  licenseWin.loadFile(path.join(__dirname, '..', 'renderer', 'license.html'));
-  licenseWin.on('closed', () => { licenseWin = null; });
-}
-
 function handleToggle() {
   if (busy) return;
-  if (!licensed) {
-    openLicenseWindow();
-    return;
-  }
   if (state === 'recording') stopRecording();
   else startRecording();
 }
 
 function handleHoldPress() {
   if (busy) return;
-  if (!licensed) {
-    openLicenseWindow();
-    return;
-  }
   if (state !== 'idle') return;
   startRecording();
 }
@@ -311,42 +234,10 @@ function hideOverlay() {
 }
 
 function registerIpc() {
-  ipcMain.handle('license:activate', async (_e, { email }) => {
-    const res = await license.activate(email).catch((err) => ({ ok: false, error: 'fetch_failed', message: err.message }));
-    if (res.ok && res.record?.tier === 'free') {
-      return { ok: false, error: 'not_purchased', message: 'No purchase is attached to this email. Buy WisperTalk to unlock.' };
-    }
-    if (res.ok) {
-      licensed = true;
-      applyHotkeys();
-      rebuildTrayMenu();
-      schedulePeriodicVerify();
-      if (licenseWin && !licenseWin.isDestroyed()) {
-        licenseWin.close();
-        licenseWin = null;
-      }
-      if (!store.get('groqApiKey')) openSettings();
-    }
-    return res;
-  });
-  ipcMain.handle('license:status', () => license.status());
-  ipcMain.handle('license:buy-url', () => BUY_URL);
-  ipcMain.handle('license:deactivate', async () => {
-    const res = await license.deactivate();
-    licensed = false;
-    hotkey.unregister();
-    rebuildTrayMenu();
-    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
-    openLicenseWindow();
-    return res;
-  });
   ipcMain.handle('shell:open', (_e, url) => shell.openExternal(url));
   ipcMain.handle('app:quit', () => app.quit());
 
-  ipcMain.handle('settings:get', () => ({
-    ...store.getAll(),
-    license: license.status()
-  }));
+  ipcMain.handle('settings:get', () => ({ ...store.getAll() }));
   ipcMain.handle('settings:choices', () => ({
     holdKeys: HOLD_KEY_CHOICES
   }));

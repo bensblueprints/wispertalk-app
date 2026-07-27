@@ -52,7 +52,7 @@ function setStatus(text) { el('status').textContent = text; }
 function renderWordCounter(license) {
   const wrap = el('wordCounter');
   wrap.innerHTML = '';
-  const isPaid = license?.hasLicense && license?.tier !== 'free';
+  const isPaid = !!license?.activated;
 
   const badge = document.createElement('div');
   badge.className = `word-counter-badge ${isPaid ? 'paid' : 'free'}`;
@@ -186,7 +186,7 @@ async function init() {
   await populateMics({ saved: cfg.inputDeviceId });
 
   writeAll(cfg);
-  renderWordCounter(cfg.license);
+  renderWordCounter(await window.flow.getLicense());
   setStatus('');
 
   for (const k of fields) {
@@ -215,8 +215,9 @@ async function init() {
   });
 
   el('deactivateBtn').addEventListener('click', async () => {
-    if (!confirm('Sign out on this computer? You will need to enter your purchase email again to use WisperTalk.')) return;
-    await window.flow.deactivateLicense();
+    if (!confirm('Sign out on this computer? WisperTalk will quit — sign back in with your Whop account on next launch.')) return;
+    try { await window.flow.deactivateLicense(); } catch {}
+    window.flow.quitApp();
   });
 
   el('toggleKey').addEventListener('click', () => {
@@ -260,9 +261,9 @@ async function save() {
 
 async function loadLicense() {
   const lic = await window.flow.getLicense();
-  el('licEmail').textContent = lic.email || '—';
-  el('licDevice').textContent = lic.deviceName || '—';
-  el('licVerified').textContent = lic.lastVerifiedAt ? new Date(lic.lastVerifiedAt).toLocaleString() : '—';
+  el('licUser').textContent = lic.activated ? (lic.userId || 'Signed in') : 'Not signed in';
+  el('licActivated').textContent = lic.activatedAt ? new Date(lic.activatedAt).toLocaleDateString() : '—';
+  el('licVerified').textContent = lic.lastCheck ? new Date(lic.lastCheck).toLocaleString() : '—';
 }
 
 async function loadHistory() {

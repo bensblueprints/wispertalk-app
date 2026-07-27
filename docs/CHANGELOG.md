@@ -9,11 +9,11 @@ See [`ROADMAP.md`](ROADMAP.md) for plans.
 ## [1.1.0] — 2026-07-28
 
 ### Changed
-- **License keys are gone.** The app now unlocks with the email used to purchase on Whop: the activation window asks for the purchase email, the server (`/api/purchase/verify`) confirms an active purchase, and the app unlocks. Existing installs with an old key-based `license.json` migrate automatically — periodic re-verify uses the stored email. Multi-device is allowed; "Deactivate this device" is now "Sign out".
+- **Licensing is now Whop-native (OneTimeSuite pattern) — no license keys.** First launch opens "Sign in with Whop" (OAuth + PKCE, loopback); the app checks the signed-in user's own access to WisperTalk Lifetime, OneTimeSuite Complete, or the legacy WisperTalk product, registers the device with the central OneTimeSuite registry (license.onetimesuite.com, max 3 devices, self-serve deactivation), and caches locally — later launches are instant, re-validated daily in the background with a 10-day offline grace. Settings → License shows the Whop account and offers "Sign out on this device".
 
 ### Removed
-- **2,000-word/month free trial.** Without a verified purchase the activation window opens at launch and hotkeys stay unregistered. Whop free-tier memberships don't count as purchases.
-- Upgrade prompt window (`upgrade.html`), monthly word counting in the local store, the trial word counter in Settings and the tray menu, and the license-key input/conflict-resolution UI.
+- **2,000-word/month free trial.** Without a verified Whop purchase the app shows the purchase-required dialog and quits. Trial products don't grant access.
+- License keys entirely: the key/email activation window, input formatter, device-conflict UI, `src/main/license.js`, the wispertalk.com license endpoints as a dependency, the upgrade prompt window, and all monthly word counting.
 
 ## [0.2.2] — 2026-05-10
 
