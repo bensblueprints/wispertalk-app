@@ -8,6 +8,7 @@ const { cleanup } = require('./postprocess');
 const { pasteText } = require('./paste');
 const { getForegroundContext } = require('./context');
 const { gateLicense, registerLicenseIpc } = require('./license-gate');
+const { isTrusted, ensureAccessibility } = require('./mac-accessibility');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-128.png');
 
@@ -51,18 +52,16 @@ async function init() {
   if (!(await gateLicense())) return; // quit already requested
   registerLicenseIpc();
 
-  // On macOS, show a one-time notice about Accessibility permission needed for paste + global hotkeys.
-  if (process.platform === 'darwin' && !store.get('macAccessibilityNoticeShown')) {
-    try {
-      await dialog.showMessageBox({
-        type: 'info',
-        title: 'WisperTalk needs Accessibility access',
-        message: 'Grant Accessibility permission to WisperTalk',
-        detail: 'macOS requires Accessibility access for WisperTalk to (1) paste your transcribed text into the focused app, and (2) detect global hotkeys.\n\nOpen System Settings → Privacy & Security → Accessibility, then enable WisperTalk.\n\nIf the toggle isn\'t there yet, try the hotkey once and macOS will offer to add it.',
-        buttons: ['Got it']
-      });
-    } catch {}
-    store.set({ macAccessibilityNoticeShown: true });
+  // On macOS the hotkey cannot install without Accessibility ("failed to enable
+  // access for assistive devices"). Ask for it properly - registering with the
+  // system so the toggle exists, then re-arming once granted. Deliberately NOT
+  // gated on a "shown once" flag: if the permission is missing the app is
+  // broken, so it must keep asking rather than fail silently on later runs.
+  if (process.platform === 'darwin' && !isTrusted(false)) {
+    ensureAccessibility({
+      reason: 'WisperTalk needs it to detect your hotkey and paste transcribed text.',
+      onGranted: () => applyHotkeys({ announceFailures: false }),
+    });
   }
 
   createOverlayWindow();
@@ -114,9 +113,26 @@ function hotkeyProblems(status) {
   return out;
 }
 
+/** uiohook's wording when macOS has not trusted us as an assistive device. */
+function looksLikeAccessibilityDenial(problems) {
+  return process.platform === 'darwin'
+    && problems.some(p => /assistive|accessibility|keyboard hook/i.test(String(p)));
+}
+
 function announceHotkeyProblems(status) {
   const problems = hotkeyProblems(status);
   if (!problems.length) return;
+
+  // Telling someone to "pick a different key" is useless when the real cause is
+  // a missing OS permission - no key will ever work. Route to the fix instead.
+  if (looksLikeAccessibilityDenial(problems)) {
+    ensureAccessibility({
+      reason: 'The keyboard hook could not be installed.',
+      onGranted: () => applyHotkeys({ announceFailures: false }),
+    });
+    return;
+  }
+
   for (const p of problems) sendToast({ kind: 'error', message: p });
   // Nothing else in the app would ever tell the user; a tray tooltip + a
   // one-shot dialog beats "the key just does nothing".

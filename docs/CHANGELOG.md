@@ -2,6 +2,17 @@
 
 All notable changes to WisperTalk. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.1] — 2026-07-29
+
+### Fixed
+- **"Could not install the keyboard hook — failed to enable access for assistive devices" on macOS.** The hotkey needs Accessibility permission, and the app only ever showed a one-time instruction dialog. Three separate causes, all fixed:
+  - Nothing ever called `isTrustedAccessibilityClient(true)`, which is what registers the app with macOS and shows Apple's own prompt. Until something asks, WisperTalk may not appear in the Accessibility list at all — so users were told to switch on a toggle that wasn't there.
+  - The notice was gated behind a "shown once" flag, so on every later launch a missing permission produced no guidance at all, just a dead hotkey.
+  - `uIOhook.start()` returns normally even when libuiohook is refused access (it only writes to its own stderr), so the app believed the hook was live while no key event ever arrived. macOS trust is now checked before starting, turning a silent failure into a reported one.
+- The app polls for the permission and **re-arms the hotkey the moment it is granted — no restart needed**. macOS emits no event for this and does not re-trust a running process, which is why granting access previously appeared to do nothing.
+- The dialog opens the exact Settings pane, and calls out that macOS keeps the permission against the *previous* build after an update: it looks enabled but isn't, and has to be toggled off and on again.
+- A hook failure caused by the missing permission no longer shows the misleading "pick a different key" dialog — no key can work until access is granted.
+
 ## [1.2.0] — 2026-07-28
 
 ### Added

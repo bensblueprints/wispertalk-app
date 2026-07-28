@@ -1,4 +1,5 @@
 const { globalShortcut, powerMonitor } = require('electron');
+const { isTrusted } = require('./mac-accessibility');
 
 let uIOhook = null;
 let UiohookKey = null;
@@ -262,6 +263,17 @@ class HotkeyManager {
    */
   ensureHookStarted() {
     if (!uIOhook) return { ok: false, error: this.hookLoadError || 'uiohook-napi not loaded' };
+    // libuiohook reports "failed to enable access for assistive devices" on its
+    // own stderr and start() still returns normally, so without this check the
+    // app believes the hook is live while no key event ever arrives. Checking
+    // the trust state up front turns that into a real, reportable failure.
+    if (process.platform === 'darwin' && !isTrusted(false)) {
+      uioStarted = false;
+      return {
+        ok: false,
+        error: 'Could not install the keyboard hook — macOS Accessibility access is not enabled for WisperTalk.',
+      };
+    }
     if (!listenersAttached) {
       uIOhook.on('keydown', (e) => this._onKeydown(e));
       uIOhook.on('keyup', (e) => this._onKeyup(e));
