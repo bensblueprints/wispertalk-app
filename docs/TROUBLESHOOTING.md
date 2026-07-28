@@ -10,7 +10,24 @@ Symptoms grouped by area. Fixes are ordered most-likely-first.
   - If `Idle (license required)` — open Settings → License → check status.
 - **macOS only**: System Settings → Privacy & Security → Accessibility → ensure WisperTalk is in the list and enabled. The toggle may not appear until you trigger the hotkey once and macOS adds it.
 - **Windows only**: some keyboards intercept `RightAlt` for a secondary character (e.g., on EU layouts `RightAlt` = `AltGr`). Switch to `ScrollLock` or `CapsLock` in Settings → Hotkeys.
-- **Toggle hotkey**: if `CommandOrControl+Shift+Space` is taken by another app (Spotlight on macOS uses `⌘+Space`, but `+Shift` should be free), change the chord. Format: `Ctrl+Alt+;`, `Shift+F19`, etc.
+- **Toggle hotkey**: if `CommandOrControl+Shift+Space` is taken by another app (Spotlight on macOS uses `⌘+Space`, but `+Shift` should be free), change the chord. Click **Record** in Settings → Hotkeys and press the combination, or type it: `Ctrl+Alt+;`, `Shift+F19`, etc.
+- **It worked, then stopped — often after the PC slept.** The OS can silently drop the low-level keyboard hook. WisperTalk re-arms automatically on resume/unlock and re-checks every minute, but you can force it: tray → **Re-arm hotkeys**, or Settings → Hotkeys → **Re-arm hotkeys now**. The banner on that tab says whether the hooks are currently armed.
+- **The tray says `(NOT ACTIVE)` next to a hotkey.** Registration failed — for the toggle that almost always means another app owns the combination; pick a different one. For the hold key, re-record it in Settings → Hotkeys.
+
+## Stuck on "Processing…" / hotkey stops responding after a short tap
+
+Fixed in 1.1.4. Before that, tapping the key too quickly to record anything could leave the app permanently busy, ignoring every later press, until you force-quit.
+
+- If you are on an older build, quit from the tray and reopen.
+- On current builds the app self-recovers within ~5 seconds and shows "No audio came back from the recorder." If it ever looks wedged, tray → **Reset (if stuck)** clears the state immediately.
+
+## Using WisperTalk offline
+
+Settings → API → **Transcription engine** → *Local (offline)*.
+
+- Runs Whisper on your own CPU. The model ships inside the installer — nothing is downloaded, and no audio leaves the machine.
+- Expect roughly 4× real-time on a modern laptop CPU (≈1.7 s for 7 s of speech) and slightly weaker accuracy on unusual proper nouns than Groq's `whisper-large-v3`. Add those names to Settings → Cleanup → **Custom vocabulary**.
+- LLM cleanup is a cloud call, so it is skipped in offline mode. To keep cleanup, point **API Base URL** at a local server (e.g. Ollama at `http://localhost:11434/v1`) and tick *Also run cleanup when using the offline engine*.
 
 ## Microphone doesn't pick up / silent recording
 

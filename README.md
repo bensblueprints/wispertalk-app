@@ -10,7 +10,7 @@ This README is the canonical "how the whole thing works" document. If you (or a 
 
 ## TL;DR
 
-**WisperTalk** records audio when you hold a hotkey, sends it to Groq Whisper for transcription, optionally cleans the result with Llama 3.3, and pastes the cleaned text into whatever app has focus. Sales + licensing live at `wispertalk.com` (Next.js + Postgres on Coolify). One device per license at a time, enforced server-side. Customers buy at $49 base + $10 per additional device, get keys by email, install the app on Windows or macOS, paste a key, and dictate.
+**WisperTalk** records audio when you hold a hotkey, transcribes it — either via Groq Whisper (default) or fully offline on the user's own CPU — optionally cleans the result with Llama 3.3, and pastes the cleaned text into whatever app has focus. Sales + licensing live at `wispertalk.com` (Next.js + Postgres on Coolify). One device per license at a time, enforced server-side. Customers buy at $49 base + $10 per additional device, get keys by email, install the app on Windows or macOS, paste a key, and dictate.
 
 Three Git repos:
 
@@ -338,5 +338,68 @@ See [`docs/ROADMAP.md`](./docs/ROADMAP.md). Highlights:
 - Wire `electron-updater` to consume `latest.yml` / `latest-mac.yml` so users auto-update (the YAML is already produced, just not consumed)
 - Server-side: validate JWT in `/api/license/verify` (currently only checks `(key, deviceId)` against DB)
 - Server-side: wrap activate's read-modify-write in a `SELECT FOR UPDATE` transaction (closes a TOCTOU race on simultaneous first-time activations)
-- Local-only mode bundling whisper.cpp (no API needed at all)
+- ~~Local-only mode bundling whisper.cpp (no API needed at all)~~ — **done** (Unreleased), via `@huggingface/transformers` + a bundled `Xenova/whisper-base.en` ONNX model rather than whisper.cpp; see §12
+- Offline mode for the *cleanup* pass too (today it is skipped offline unless pointed at a local Ollama)
+- A larger optional offline model (`whisper-small.en`) as a separate download for users who want cloud-grade accuracy offline
 - Per-app prompt overrides (different cleanup persona per foreground app)
+
+## 12. Offline transcription (the "Local" engine)
+
+WisperTalk ships two transcription engines, chosen in **Settings → API → Transcription engine** (`sttEngine` in `config.json`):
+
+| | `groq` (default) | `local` |
+|---|---|---|
+| Where audio goes | `api.groq.com` with the customer's own key | nowhere — stays on the machine |
+| Model | `whisper-large-v3` | `Xenova/whisper-base.en`, int8 ONNX |
+| Needs internet / API key | yes | no |
+| Speed (7 s of speech, laptop CPU) | ~1 s incl. network | ~1.7 s warm, ~3 s first run (model load) |
+| Accuracy | best | very good; weaker on unusual proper nouns |
+| LLM cleanup | yes | skipped unless `llmCleanupWhenLocal` + a reachable base URL |
+
+Existing installs keep `groq` — `config.json` has no `sttEngine` key, and `{...DEFAULTS, ...parsed}` leaves the default in place. Local is strictly opt-in.
+
+### How it's wired
+
+```
+overlay.js  decodeTo16kMono()     Web Audio API: webm/opus -> 16 kHz mono Float32
+    │                             (this is why no ffmpeg is bundled)
+    ▼  recorder:audio {audioBuffer, mimeType, pcm}
+main.js#processAudio
+    │  sttEngine === 'local' ?
+    ├── yes → src/main/local-asr.js  →  @huggingface/transformers pipeline
+    │                                   on onnxruntime-node (CPU EP)
+    └── no  → src/main/transcribe.js →  POST {llmApiBaseUrl}/audio/transcriptions
+```
+
+`src/main/local-asr.js` sets `env.localModelPath` to the bundled `models/` directory and `env.allowRemoteModels = false`, so a missing file is a loud error rather than a silent download — the failure mode bg-remover hit with `@imgly`'s `publicPath`.
+
+### Where the weights live
+
+`scripts/fetch-models.js` pulls the 7 model files into `models/Xenova/whisper-base.en/` at **build** time (`npm run models`, which `npm run dist` and `npm run dist:mac` both invoke). `models/` is gitignored — the repo stays lean and CI fetches them. `package.json` lists `models/**/*` in `build.files` and `build.asarUnpack`, so in a packaged app they resolve at:
+
+```
+resources/app.asar.unpacked/models/Xenova/whisper-base.en/
+    config.json  generation_config.json  preprocessor_config.json
+    tokenizer.json  tokenizer_config.json
+    onnx/encoder_model_quantized.onnx          (22 MB)
+    onnx/decoder_model_merged_quantized.onnx   (51 MB)
+```
+
+Verify a build actually contains them:
+
+```bash
+7zr x "dist/WisperTalk Setup <ver>.exe" -o./extract -y
+find ./extract/resources/app.asar.unpacked/models -type f
+```
+
+### Size accounting
+
+Adding a local engine roughly doubles the installer (82 MB → 140 MB). Three exclusions keep it from being far worse — all in `build.files`:
+
+| Pruned | Why safe | Saved (uncompressed) |
+|---|---|---|
+| `onnxruntime-web` | transformers.js only uses it in a browser context; in Electron's main process it resolves `onnxruntime-node`. Verified by deleting the package and re-running a real transcription. | ~90 MB |
+| `DirectML.dll`, `dxcompiler.dll`, `dxil.dll` | Windows DML execution provider; we run the CPU EP and ORT delay-loads them. Verified by renaming them away and re-running a transcription. | ~38 MB |
+| `onnxruntime-node` binaries for other platforms | per-platform `files` negations in `build.win` / `build.mac` | ~150 MB |
+
+`sharp` (18 MB of libvips) **cannot** be pruned — `@huggingface/transformers` imports it at module load and fails with `ERR_MODULE_NOT_FOUND` without it.

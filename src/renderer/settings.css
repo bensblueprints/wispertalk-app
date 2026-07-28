@@ -360,3 +360,14 @@ footer {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+/* Press-to-map capture: the button visibly "arms" while waiting for a key. */
+.btn-ghost.capturing {
+  border-color: var(--accent, #f97316);
+  color: var(--accent, #f97316);
+  animation: capture-pulse 1.1s ease-in-out infinite;
+}
+@keyframes capture-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}

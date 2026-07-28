@@ -1,13 +1,75 @@
 const fields = [
-  'groqApiKey', 'llmApiBaseUrl', 'sttModel', 'llmModel',
+  'sttEngine', 'groqApiKey', 'llmApiBaseUrl', 'sttModel', 'llmModel',
   'transcriptionLanguage', 'inputDeviceId',
-  'enableLlmCleanup', 'useAppContext', 'vocabulary', 'cleanupPrompt',
+  'enableLlmCleanup', 'llmCleanupWhenLocal', 'useAppContext', 'vocabulary', 'cleanupPrompt',
   'holdEnabled', 'holdHotkey', 'toggleEnabled', 'toggleHotkey',
   'showOverlay', 'autoPaste', 'pasteDelayMs'
 ];
 
-const checkboxes = new Set(['enableLlmCleanup', 'useAppContext', 'holdEnabled', 'toggleEnabled', 'showOverlay', 'autoPaste']);
+const checkboxes = new Set(['enableLlmCleanup', 'llmCleanupWhenLocal', 'useAppContext', 'holdEnabled', 'toggleEnabled', 'showOverlay', 'autoPaste']);
 const numbers = new Set(['pasteDelayMs']);
+
+const DEFAULT_HOLD_KEY = 'AltRight';
+
+// Fallback only: used when the native key hook can't be loaded, so the user can
+// still map a key from the focused Settings window. Maps DOM KeyboardEvent.code
+// onto the same canonical names the main process stores.
+function nameFromDomCode(code, key) {
+  if (!code) return null;
+  const direct = {
+    ControlLeft: 'Ctrl', ControlRight: 'CtrlRight',
+    AltLeft: 'Alt', AltRight: 'AltRight',
+    ShiftLeft: 'Shift', ShiftRight: 'ShiftRight',
+    MetaLeft: 'Meta', MetaRight: 'MetaRight',
+    OSLeft: 'Meta', OSRight: 'MetaRight',
+    Space: 'Space', Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace',
+    CapsLock: 'CapsLock', NumLock: 'NumLock', ScrollLock: 'ScrollLock',
+    PrintScreen: 'PrintScreen', Escape: 'Escape', Insert: 'Insert', Delete: 'Delete',
+    Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+    ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+    Minus: 'Minus', Equal: 'Equal', BracketLeft: 'BracketLeft', BracketRight: 'BracketRight',
+    Backslash: 'Backslash', Semicolon: 'Semicolon', Quote: 'Quote', Backquote: 'Backquote',
+    Comma: 'Comma', Period: 'Period', Slash: 'Slash',
+    NumpadAdd: 'NumpadAdd', NumpadSubtract: 'NumpadSubtract', NumpadMultiply: 'NumpadMultiply',
+    NumpadDivide: 'NumpadDivide', NumpadDecimal: 'NumpadDecimal', NumpadEnter: 'NumpadEnter'
+  };
+  if (direct[code]) return direct[code];
+  let m = /^Key([A-Z])$/.exec(code);
+  if (m) return m[1];
+  m = /^Digit([0-9])$/.exec(code);
+  if (m) return m[1];
+  m = /^Numpad([0-9])$/.exec(code);
+  if (m) return `Numpad${m[1]}`;
+  m = /^F([1-9]|1[0-9]|2[0-4])$/.exec(code);
+  if (m) return code;
+  return key ? key.toUpperCase() : null;
+}
+
+function acceleratorFromDom(e) {
+  const name = nameFromDomCode(e.code, e.key);
+  if (!name) return null;
+  if (['Ctrl', 'CtrlRight', 'Alt', 'AltRight', 'Shift', 'ShiftRight', 'Meta', 'MetaRight'].includes(name)) return null;
+  const table = {
+    Enter: 'Return', NumpadEnter: 'Return', ArrowUp: 'Up', ArrowDown: 'Down',
+    ArrowLeft: 'Left', ArrowRight: 'Right', CapsLock: 'Capslock', NumLock: 'Numlock',
+    ScrollLock: 'Scrolllock', Semicolon: ';', Equal: '=', Comma: ',', Minus: '-',
+    Period: '.', Slash: '/', Backquote: '`', BracketLeft: '[', BracketRight: ']',
+    Backslash: '\\', Quote: "'", NumpadAdd: 'numadd', NumpadSubtract: 'numsub',
+    NumpadMultiply: 'nummult', NumpadDivide: 'numdiv', NumpadDecimal: 'numdec'
+  };
+  let base = table[name];
+  if (!base) {
+    if (/^Numpad[0-9]$/.test(name)) base = `num${name.slice(-1)}`;
+    else base = name;
+  }
+  const parts = [];
+  if (e.ctrlKey) parts.push('Control');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.metaKey) parts.push(navigator.platform.startsWith('Mac') ? 'Command' : 'Super');
+  parts.push(base);
+  return parts.join('+');
+}
 
 const LANGUAGES = [
   ['', 'Auto-detect'],
@@ -169,14 +231,128 @@ async function populateMics({ saved, requestPermission = false } = {}) {
   }
 }
 
-async function init() {
-  const choices = await window.flow.getChoices();
-  const sel = el('holdHotkey');
-  for (const k of choices.holdKeys) {
-    const opt = document.createElement('option');
-    opt.value = k; opt.textContent = k;
-    sel.appendChild(opt);
+let choices = {};
+let capturing = null;
+
+async function setHoldLabel(name) {
+  const btn = el('holdCapture');
+  if (!btn) return;
+  if (!name) { btn.textContent = 'Click, then press any key'; return; }
+  let label = name;
+  try { label = await window.flow.labelForKey(name); } catch {}
+  btn.textContent = `${label}  —  click to change`;
+}
+
+function beginCaptureUi(btn, text) {
+  btn.dataset.prev = btn.textContent;
+  btn.textContent = text;
+  btn.classList.add('capturing');
+}
+
+function endCaptureUi(btn) {
+  btn.classList.remove('capturing');
+}
+
+/** Renderer-side fallback when the native hook isn't available. */
+function domCapture(mode) {
+  return new Promise((resolve) => {
+    const onKey = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') { finish({ ok: false, cancelled: true }); return; }
+      if (mode === 'toggle') {
+        const accel = acceleratorFromDom(e);
+        if (!accel) return; // still waiting for a real key
+        finish({ ok: true, value: accel, label: accel });
+        return;
+      }
+      const name = nameFromDomCode(e.code, e.key);
+      if (!name) return;
+      finish({ ok: true, value: name, label: name });
+    };
+    const finish = (result) => {
+      window.removeEventListener('keydown', onKey, true);
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ ok: false, cancelled: true, reason: 'timeout' }), 15000);
+    window.addEventListener('keydown', onKey, true);
+  });
+}
+
+async function runCapture(mode) {
+  const btn = mode === 'toggle' ? el('toggleCapture') : el('holdCapture');
+  if (capturing) {
+    try { await window.flow.cancelCapture(); } catch {}
   }
+  capturing = mode;
+  beginCaptureUi(btn, mode === 'toggle' ? 'Press the combination… (Esc to cancel)' : 'Press any key… (Esc to cancel)');
+
+  let result;
+  try {
+    result = await window.flow.captureHotkey(mode);
+    if (result && result.unavailable) result = await domCapture(mode);
+  } catch (err) {
+    result = { ok: false, error: err.message || String(err) };
+  }
+
+  capturing = null;
+  endCaptureUi(btn);
+
+  if (!result || !result.ok) {
+    if (result && result.error) showToast({ kind: 'error', message: result.error });
+    if (mode === 'toggle') {
+      btn.textContent = btn.dataset.prev || 'Record';
+    } else {
+      await setHoldLabel(el('holdHotkey').value);
+    }
+    return;
+  }
+
+  if (mode === 'toggle') {
+    el('toggleHotkey').value = result.value;
+    btn.textContent = btn.dataset.prev || 'Record';
+    el('toggleEnabled').checked = true;
+  } else {
+    el('holdHotkey').value = result.value;
+    await setHoldLabel(result.value);
+    el('holdEnabled').checked = true;
+  }
+  markDirty();
+}
+
+async function refreshHotkeyStatus() {
+  const node = el('hotkeyStatus');
+  if (!node) return;
+  let status = null;
+  try { status = await window.flow.getHotkeyStatus(); } catch {}
+  if (!status) { node.textContent = ''; return; }
+  const problems = [];
+  if (status.hold?.enabled && !status.hold.ok && status.hold.error) problems.push(status.hold.error);
+  if (status.toggle?.enabled && !status.toggle.ok && status.toggle.error) problems.push(status.toggle.error);
+  if (problems.length) {
+    node.textContent = `⚠ ${problems.join(' ')}`;
+    node.style.color = '#ef4444';
+  } else {
+    node.textContent = '✓ Hotkeys are armed.';
+    node.style.color = '';
+  }
+}
+
+function updateEngineHint() {
+  const engine = el('sttEngine').value;
+  const hint = el('engineHint');
+  if (engine === 'local') {
+    hint.textContent = choices.localEngineAvailable
+      ? `Offline: audio is transcribed on this computer with ${choices.localModelId} bundled in the app. No internet, no API key. Slower than Groq and a little less accurate on names.`
+      : '⚠ Offline model files are missing from this install — this build cannot run the local engine. Switch back to Groq.';
+  } else {
+    hint.textContent = 'Groq sends your audio to api.groq.com using your own key. Fastest and most accurate.';
+  }
+}
+
+async function init() {
+  choices = await window.flow.getChoices();
 
   populateLanguages();
 
@@ -186,15 +362,34 @@ async function init() {
   await populateMics({ saved: cfg.inputDeviceId });
 
   writeAll(cfg);
+  await setHoldLabel(cfg.holdHotkey);
+  updateEngineHint();
+  await refreshHotkeyStatus();
   renderWordCounter(await window.flow.getLicense());
   setStatus('');
 
   for (const k of fields) {
     const node = el(k);
     if (!node) continue;
+    if (node.type === 'hidden') continue; // holdHotkey is set via press-to-map
     const evt = (node.tagName === 'SELECT' || node.type === 'checkbox') ? 'change' : 'input';
     node.addEventListener(evt, markDirty);
   }
+
+  el('sttEngine').addEventListener('change', updateEngineHint);
+
+  el('holdCapture').addEventListener('click', () => runCapture('hold'));
+  el('toggleCapture').addEventListener('click', () => runCapture('toggle'));
+  el('holdReset').addEventListener('click', async () => {
+    el('holdHotkey').value = DEFAULT_HOLD_KEY;
+    await setHoldLabel(DEFAULT_HOLD_KEY);
+    markDirty();
+  });
+  el('rearmHotkeys').addEventListener('click', async () => {
+    await window.flow.rearmHotkeys();
+    await refreshHotkeyStatus();
+    showToast({ kind: 'success', message: 'Hotkeys re-armed.' });
+  });
 
   el('refreshMics').addEventListener('click', async () => {
     const current = el('inputDeviceId').value;
@@ -235,6 +430,9 @@ async function init() {
     initial = next;
     await populateMics({ saved: next.inputDeviceId });
     writeAll(next);
+    await setHoldLabel(next.holdHotkey);
+    updateEngineHint();
+    await refreshHotkeyStatus();
     showToast({ kind: 'success', message: 'Settings reset.' });
     clearDirty();
   });
@@ -250,12 +448,20 @@ async function init() {
 
 async function save() {
   const updates = readAll();
-  if (!updates.groqApiKey) {
-    showToast({ kind: 'warn', message: 'Add a Groq API key before using WisperTalk.' });
+  if (updates.sttEngine !== 'local' && !updates.groqApiKey) {
+    showToast({ kind: 'warn', message: 'Add a Groq API key, or switch the engine to Local (offline).' });
   }
   const next = await window.flow.setSettings(updates);
   initial = next;
-  showToast({ kind: 'success', message: 'Settings saved.' });
+  await refreshHotkeyStatus();
+  const status = next.__hotkeyStatus;
+  const holdBad = status?.hold?.enabled && !status.hold.ok;
+  const toggleBad = status?.toggle?.enabled && !status.toggle.ok;
+  if (holdBad || toggleBad) {
+    showToast({ kind: 'error', message: (holdBad ? status.hold.error : status.toggle.error) || 'Hotkey could not be registered.' });
+  } else {
+    showToast({ kind: 'success', message: 'Settings saved.' });
+  }
   clearDirty();
 }
 

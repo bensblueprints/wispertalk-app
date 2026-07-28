@@ -3,6 +3,10 @@ const path = require('node:path');
 const { app } = require('electron');
 
 const DEFAULTS = {
+  // 'groq' (cloud, the shipped behaviour) or 'local' (offline whisper.onnx).
+  // Existing installs have no value in config.json, so `{...DEFAULTS, ...parsed}`
+  // leaves them on 'groq' — nobody is silently moved onto the local engine.
+  sttEngine: 'groq',
   groqApiKey: '',
   llmApiBaseUrl: 'https://api.groq.com/openai/v1',
   sttModel: 'whisper-large-v3',
@@ -24,6 +28,8 @@ Output rules:
 - Do not add words, names, or content that are not in the transcription. The context is only for correcting spelling of words already spoken.
 - Do not change the meaning of what was said.`,
   vocabulary: '',
+  // Cleanup is a cloud call; off by default in offline mode so "Local" means local.
+  llmCleanupWhenLocal: false,
   useAppContext: true,
   holdHotkey: 'RightAlt',
   toggleHotkey: 'CommandOrControl+Shift+Space',

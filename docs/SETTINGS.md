@@ -12,7 +12,9 @@ The file is JSON, formatted, and safe to edit by hand if WisperTalk is closed.
 
 | Key | Type | Default | What it does |
 |---|---|---|---|
-| `groqApiKey` | string | `""` | Bearer token for STT + LLM endpoint. Required to dictate. Stored locally only. |
+| `sttEngine` | string | `"groq"` | `"groq"` = send audio to the cloud API (default, unchanged for existing installs). `"local"` = transcribe on this machine with the bundled `Xenova/whisper-base.en` ONNX model — no internet, no API key, no audio leaves the device. |
+| `llmCleanupWhenLocal` | boolean | `false` | Cleanup is a cloud call. With `sttEngine: "local"` it is skipped unless this is on — turn it on only if `llmApiBaseUrl` points somewhere reachable offline (e.g. Ollama). |
+| `groqApiKey` | string | `""` | Bearer token for STT + LLM endpoint. Required to dictate on the Groq engine. Stored locally only. |
 | `llmApiBaseUrl` | string | `"https://api.groq.com/openai/v1"` | Root of the OpenAI-compatible API. Change to point at OpenAI, Ollama, OpenRouter, etc. |
 | `sttModel` | string | `"whisper-large-v3"` | Speech-to-text model name passed to `/audio/transcriptions`. |
 | `llmModel` | string | `"llama-3.3-70b-versatile"` | Cleanup model name passed to `/chat/completions`. Only used if `enableLlmCleanup` is true. |
@@ -21,7 +23,7 @@ The file is JSON, formatted, and safe to edit by hand if WisperTalk is closed.
 | `vocabulary` | string | `""` | Comma- or newline-separated terms (names, jargon) preserved through cleanup. |
 | `cleanupPrompt` | string | (long default) | System prompt for the cleanup LLM. Edit for different personas (formal email vs. code comments vs. chat). |
 | `holdEnabled` | boolean | `true` | Use the hold-to-talk hotkey. |
-| `holdHotkey` | string | `"RightAlt"` | Which key. One of: `RightAlt`, `ScrollLock`, `CapsLock`, `F13`–`F20`, `RightCtrl`, `RightShift`, `RightWin` (Windows) / `RightCmd` (macOS). |
+| `holdHotkey` | string | `"AltRight"` | Which key, as a uiohook key name (`AltRight`, `CtrlRight`, `ShiftRight`, `MetaRight`, `CapsLock`, `ScrollLock`, `F13`–`F24`, letters, numpad, …). Set it in Settings → Hotkeys by clicking the field and pressing the key; any physical key works, and unnamed keys are stored as `Key<keycode>`. Pre-1.1.4 names (`RightAlt`, `RightCtrl`, `RightShift`, `RightWin`) are still accepted. |
 | `toggleEnabled` | boolean | `true` | Use the tap-to-toggle shortcut. |
 | `toggleHotkey` | string | `"CommandOrControl+Shift+Space"` | Electron-format accelerator. `CommandOrControl` resolves to `Ctrl` on Windows, `⌘` on macOS. |
 | `showOverlay` | boolean | `true` | Show the floating recording bar at the bottom of the screen. |

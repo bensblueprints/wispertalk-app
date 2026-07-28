@@ -2,7 +2,25 @@
 
 All notable changes to WisperTalk. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.2.0] — 2026-07-28
+
+### Added
+- **Offline transcription engine.** Settings → API → *Transcription engine* now offers **Local (offline)** alongside **Groq (cloud)**. Local runs `Xenova/whisper-base.en` (int8 ONNX) through `@huggingface/transformers` on `onnxruntime-node`, entirely on the user's CPU — no internet, no API key, no audio leaving the machine. The weights (76 MB) ship **inside the installer** under `resources/app.asar.unpacked/models/`; `env.allowRemoteModels` is hard-off so nothing is ever downloaded at runtime. Existing installs stay on Groq — the new setting defaults to the old behaviour.
+  - The overlay renderer decodes the recording to 16 kHz mono PCM with the Web Audio API, so no ffmpeg is bundled.
+  - LLM cleanup is a cloud call, so it is skipped in offline mode unless `llmCleanupWhenLocal` is turned on (for e.g. a local Ollama).
+- **Press-to-map hotkeys.** The hold key is no longer a dropdown of 14 hard-coded choices — click the field and press any physical key. Function keys, right-hand modifiers, numpad, and keys with no name at all (stored as `Key<keycode>`) all bind. The toggle shortcut has a **Record** button that captures the whole chord. Esc cancels; **Reset** restores the default.
+- **Hotkey resilience.** The keyboard hook is re-armed on system resume and screen unlock, a health check re-installs it if it dies while the user is active, and registration failures now raise a dialog + tray warning + Settings banner instead of a silent `console.warn`. Tray gained **Re-arm hotkeys** and **Reset (if stuck)**.
+- Request timeouts on transcription (120 s) and cleanup (60 s).
+
+### Fixed
+- **Tapping the hotkey with no speech hung the app until force-quit.** A press-and-release faster than `getUserMedia()` reached `stopRecording()` while `mediaRecorder` was still `null`; that path cleaned up and returned without ever sending `recorder:audio`, so the main process stayed `busy = true` forever and every later press was swallowed by the `if (busy) return` guards. The renderer now replies exactly once on **every** path — released-before-mic-opened, zero chunks captured, `onstop` never firing, mic error, stop-while-idle — and the main process arms a 5 s watchdog when it asks for audio, so a silent renderer can no longer wedge it.
+- Hotkey presses during startup are no longer lost: `recorder:start` / `recorder:stop` sent before the overlay window finished loading were dropped on the floor, leaving the same stuck state. Sends are now gated on the window being ready, and a crashed overlay renderer is rebuilt automatically.
+- Existing `holdHotkey` values (`RightAlt`, `RightCtrl`, `RightShift`, `RightWin`) are aliased to their uiohook names, so upgrading does not break anyone's saved key.
+- Errors raised while the Settings window is closed now show an OS notification instead of disappearing.
+
+### Changed
+- App icon and tray icon replaced with the WisperTalk mark.
+- Windows build prunes `onnxruntime-web` (unused in Node), the DirectML/dxcompiler DLLs, and non-Windows ONNX Runtime binaries. Installer: 82 MB → 140 MB with the offline model included.
 
 See [`ROADMAP.md`](ROADMAP.md) for plans.
 
