@@ -2,7 +2,7 @@
 
 All notable changes to WisperTalk. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.2.0] — 2026-07-28
 
 ### Added
 - **Offline transcription engine.** Settings → API → *Transcription engine* now offers **Local (offline)** alongside **Groq (cloud)**. Local runs `Xenova/whisper-base.en` (int8 ONNX) through `@huggingface/transformers` on `onnxruntime-node`, entirely on the user's CPU — no internet, no API key, no audio leaving the machine. The weights (76 MB) ship **inside the installer** under `resources/app.asar.unpacked/models/`; `env.allowRemoteModels` is hard-off so nothing is ever downloaded at runtime. Existing installs stay on Groq — the new setting defaults to the old behaviour.
