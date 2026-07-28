@@ -3,3 +3,6 @@ dist/
 build/icon.ico
 *.log
 .DS_Store
+
+# Offline Whisper weights — fetched at build time by scripts/fetch-models.js
+models/

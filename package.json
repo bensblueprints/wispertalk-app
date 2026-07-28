@@ -12,12 +12,14 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "icon": "node scripts/make-icon.js",
-    "pack": "npm run icon && electron-builder --dir",
-    "dist": "npm run icon && electron-builder --win",
-    "dist:mac": "electron-builder --mac --arm64 --x64",
+    "models": "node scripts/fetch-models.js",
+    "pack": "npm run icon && npm run models && electron-builder --dir",
+    "dist": "npm run icon && npm run models && electron-builder --win",
+    "dist:mac": "npm run models && electron-builder --mac --arm64 --x64",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "uiohook-napi": "^1.5.4"
   },
   "devDependencies": {
@@ -35,10 +37,14 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "package.json"
+      "models/**/*",
+      "package.json",
+      "!node_modules/onnxruntime-web${/*}"
     ],
     "asarUnpack": [
-      "node_modules/uiohook-napi/**/*"
+      "node_modules/uiohook-napi/**/*",
+      "node_modules/onnxruntime-node/**/*",
+      "models/**/*"
     ],
     "win": {
       "target": [
@@ -46,7 +52,15 @@
         { "target": "portable", "arch": ["x64"] }
       ],
       "icon": "build/icon.ico",
-      "publisherName": "Advanced Marketing"
+      "publisherName": "Advanced Marketing",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v6/darwin${/*}",
+        "!node_modules/onnxruntime-node/bin/napi-v6/linux${/*}",
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64${/*}",
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/DirectML.dll",
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/dxcompiler.dll",
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/dxil.dll"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -64,6 +78,10 @@
         { "target": "zip", "arch": ["arm64", "x64"] }
       ],
       "category": "public.app-category.productivity",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32${/*}",
+        "!node_modules/onnxruntime-node/bin/napi-v6/linux${/*}"
+      ],
       "icon": "build/icon.png",
       "identity": null,
       "gatekeeperAssess": false,

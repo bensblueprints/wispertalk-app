@@ -15,11 +15,22 @@ async function transcribe({ audioBuffer, mimeType, apiKey, baseUrl, model, langu
     form.append('language', language.trim());
   }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form
-  });
+  // Without a timeout a stalled connection leaves the app in "Processing…"
+  // forever with no way back except force-quit.
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(120000)
+    });
+  } catch (err) {
+    if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error('Transcription timed out after 120s. Check your connection, or switch to the offline engine in Settings.');
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
