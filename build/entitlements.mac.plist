@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Notarisation requires the hardened runtime, which blocks things Electron
+       needs by default. Each entitlement below is the minimum to keep the app
+       working once hardened: -->
+
+  <!-- V8 compiles JavaScript at runtime. Without these two, Electron crashes. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- Native modules (uiohook-napi for the global hotkey, onnxruntime-node for
+       the offline Whisper engine) are loaded from the app bundle. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- Dictation records from the microphone. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+
+  <!-- Electron sets DYLD_* when relaunching helper processes. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

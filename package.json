@@ -105,13 +105,14 @@
         "!node_modules/onnxruntime-node/bin/napi-v6/linux${/*}"
       ],
       "icon": "build/icon.png",
-      "identity": null,
       "gatekeeperAssess": false,
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "WisperTalk needs microphone access to transcribe your speech.",
+        "NSMicrophoneUsageDescription": "WisperTalk records from your microphone so it can transcribe what you say and paste the text where your cursor is.",
         "NSAppleEventsUsageDescription": "WisperTalk uses AppleScript to paste transcribed text into the focused application."
-      }
+      },
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "sign": false,
