@@ -2,6 +2,21 @@
 
 All notable changes to WisperTalk. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.2] — 2026-07-29
+
+### Fixed
+- **"Accessibility is not enabled" even after enabling it.** 1.2.1 asked for the permission correctly, but two macOS behaviours make granting it impossible or ineffective, and the app gave no hint either was happening:
+  - **App Translocation.** An app launched from the mounted disk image — or from Downloads while still quarantined — is run by macOS from a randomised, read-only path. Accessibility can *never* be granted in that state: the toggle can be switched on repeatedly and the app stays denied. WisperTalk now detects this and says to move it to Applications and eject the image, instead of sending you to a toggle that cannot work.
+  - **Stale permission entries.** macOS ties Accessibility to the app's code signature. Now that builds are signed with a Developer ID, any permission granted to an earlier unsigned build no longer applies — the old entry still appears switched on while being denied. The dialog now says to **remove** the entry with the minus button and re-add it, because toggling it off and on often does not clear the old binding.
+
+### If you are stuck on an older build
+Quit WisperTalk, then in Terminal:
+```
+xattr -dr com.apple.quarantine /Applications/WisperTalk.app
+tccutil reset Accessibility com.wispertalk.app
+```
+Then launch it from **Applications** (not from the disk image) and allow Accessibility when asked.
+
 ## [1.2.1] — 2026-07-29
 
 ### Fixed

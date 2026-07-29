@@ -38,6 +38,25 @@ function isTrusted(prompt = false) {
   }
 }
 
+/**
+ * macOS "App Translocation": an app launched from a DMG, or from Downloads while
+ * still quarantined, is run from a randomised read-only path. Accessibility can
+ * NEVER be granted to a translocated app - the toggle can be switched on and the
+ * app stays denied forever, which is indistinguishable from a broken app.
+ * The only fix is to move it to /Applications and clear the quarantine flag.
+ */
+function isTranslocated() {
+  if (!isMac()) return false;
+  const p = process.execPath || '';
+  return p.includes('/AppTranslocation/') || p.startsWith('/private/var/folders/');
+}
+
+/** True when running from a disk image mount rather than an installed copy. */
+function isRunningFromDmg() {
+  if (!isMac()) return false;
+  return (process.execPath || '').startsWith('/Volumes/');
+}
+
 function openSettings() {
   return shell.openExternal(PANE).catch(err =>
     console.warn('[a11y] could not open Settings pane:', err.message));
@@ -74,6 +93,30 @@ async function ensureAccessibility({ reason = '', onGranted } = {}) {
   if (pending) return pending;
 
   pending = (async () => {
+    // Translocation / running from the DMG must be handled FIRST: in that state
+    // granting Accessibility is impossible, so sending the user to the toggle
+    // just makes them enable something that silently keeps failing.
+    if (isTranslocated() || isRunningFromDmg()) {
+      const fromDmg = isRunningFromDmg();
+      await dialog.showMessageBox({
+        type: 'warning',
+        title: 'Move WisperTalk to Applications',
+        message: 'WisperTalk must be installed before the hotkey can work',
+        detail:
+          (fromDmg
+            ? 'WisperTalk is running from the disk image rather than from your Applications folder.'
+            : 'macOS is running WisperTalk from a temporary, randomised location (App Translocation).') +
+          '\n\nIn this state macOS will not let WisperTalk have Accessibility access, no matter how many ' +
+          'times the toggle is switched on - which is why enabling it appears to do nothing.\n\n' +
+          '1. Quit WisperTalk.\n' +
+          '2. Drag WisperTalk into your Applications folder.\n' +
+          '3. Eject the WisperTalk disk image.\n' +
+          '4. Open WisperTalk from Applications and allow Accessibility when asked.',
+        buttons: ['OK'],
+      }).catch(() => {});
+      return false;
+    }
+
     // This call is the one that registers us with the system / shows Apple's
     // prompt. Do it before our own dialog so the toggle exists when they look.
     isTrusted(true);
@@ -88,8 +131,10 @@ async function ensureAccessibility({ reason = '', onGranted } = {}) {
         '1. Click "Open System Settings" below.\n' +
         '2. Find WisperTalk in the list and switch it ON.\n' +
         '3. Come back here - the hotkey starts working straight away, no restart needed.\n\n' +
-        'If WisperTalk is already listed and switched on, switch it OFF and ON again. macOS keeps the old ' +
-        'permission against the previous version of the app after an update, which looks enabled but is not.',
+        'Already listed and switched ON but still not working? Select WisperTalk in that list, press the ' +
+        'minus (-) button to REMOVE it, then add it again. macOS ties the permission to the app\'s code ' +
+        'signature, so after an update the old entry looks enabled while actually being denied - and ' +
+        'toggling it off and on is often not enough to clear that. Removing and re-adding is.',
       buttons: ['Open System Settings', 'Later'],
       defaultId: 0,
       cancelId: 1,
@@ -108,4 +153,7 @@ async function ensureAccessibility({ reason = '', onGranted } = {}) {
   return pending;
 }
 
-module.exports = { isTrusted, ensureAccessibility, openSettings, waitForTrust };
+module.exports = {
+  isTrusted, ensureAccessibility, openSettings, waitForTrust,
+  isTranslocated, isRunningFromDmg,
+};
