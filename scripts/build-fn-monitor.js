@@ -35,22 +35,11 @@ function build() {
     fs.chmodSync(OUT, 0o755);
     console.log('[fn-monitor] built', OUT);
 
-    // extraResources are copied verbatim - electron-builder does not sign them.
-    // This is a separate executable the app spawns, so under hardened runtime it
-    // needs its own Developer ID signature or macOS refuses to run it.
-    const identity = process.env.CSC_NAME;
-    if (identity) {
-      try {
-        execFileSync('codesign', [
-          '--force', '--timestamp', '--options', 'runtime', '-s', identity, OUT,
-        ], { stdio: 'inherit' });
-        console.log('[fn-monitor] signed with', identity);
-      } catch (err) {
-        console.warn('[fn-monitor] signing failed:', err.message);
-      }
-    } else {
-      console.log('[fn-monitor] CSC_NAME not set - helper left unsigned');
-    }
+    // No codesign here on purpose: electron-builder signs Mach-O binaries it
+    // finds in extraResources as part of packaging, and it applies the hardened
+    // runtime. Verified on the packaged app - Contents/Resources/fn-monitor
+    // carries the Developer ID signature with flags=0x10000(runtime). Signing it
+    // again here just raced that and failed.
   } catch (err) {
     // Don't take the build down over an optional hold key.
     console.warn('[fn-monitor] compile failed - Globe/Fn will be unavailable:', err.message);
