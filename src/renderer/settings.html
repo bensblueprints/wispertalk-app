@@ -92,11 +92,16 @@
       <div class="row">
         <label>Hold key</label>
         <div class="input-group">
-          <button class="btn-ghost" id="holdCapture" type="button" style="flex: 1; text-align: left;">Click, then press any key</button>
+          <select id="holdPicker" style="flex: 1">
+            <option value="">Choose a key…</option>
+          </select>
           <button class="btn-ghost" id="holdReset" type="button">Reset</button>
         </div>
+        <div class="input-group" style="margin-top: 6px">
+          <button class="btn-ghost" id="holdCapture" type="button" style="flex: 1; text-align: left;">…or click here and press any key</button>
+        </div>
         <input type="hidden" id="holdHotkey" />
-        <p class="hint" id="holdHint">Any physical key works — function keys, right-hand Alt/Ctrl/Shift/Win, Caps Lock, numpad. Press Esc while recording to cancel.</p>
+        <p class="hint" id="holdHint">Pick a key from the list, or capture any physical key — function keys, right-hand modifiers, Caps Lock, numpad. Press Esc while capturing to cancel.</p>
       </div>
       <hr />
       <div class="row">

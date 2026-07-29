@@ -2,6 +2,16 @@
 
 All notable changes to WisperTalk. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] — 2026-07-29
+
+### Added
+- **Globe / Fn (🌐) as a hold-to-talk key on macOS.** This could not be done with the keyboard hook: macOS never emits a key press for Globe/Fn — it only sets the `maskSecondaryFn` modifier flag on `flagsChanged` events, and libuiohook maps that keycode to `VC_UNDEFINED`. WisperTalk now ships a small signed Swift helper (`fn-monitor`) that taps `flagsChanged` directly and reports press/release to the app. The tap is **listen-only**, so Globe still does whatever you have it set to do in System Settings. If macOS disables the tap (it does this when a tap is slow), the helper re-enables it rather than going quiet — the same failure the keyboard hook used to have.
+- **A hold-key dropdown**, so keys can be chosen from a list instead of only by pressing them. On macOS: Globe/Fn, Right Command (⌘), Right Option (⌥), Right Control (⌃), Right Shift (⇧), Caps Lock, and F13–F20. Press-to-capture is still there for anything not on the list.
+
+### Changed
+- Mac keys are now named the way Apple names them — **Option (⌥)**, **Control (⌃)**, **Command (⌘)** — instead of the Windows-style Alt/Ctrl/Win, which sent Mac users looking for keys that aren't on their keyboard. Scroll Lock is no longer offered on macOS; Mac keyboards don't have one.
+- Globe/Fn is only listed when its helper is actually present in the build. An option that silently never fires is worse than no option.
+
 ## [1.2.2] — 2026-07-29
 
 ### Fixed

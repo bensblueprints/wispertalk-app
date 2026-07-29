@@ -1,5 +1,6 @@
 const { globalShortcut, powerMonitor } = require('electron');
 const { isTrusted } = require('./mac-accessibility');
+const { FnMonitor, isAvailable: fnAvailable, KEY_NAME: FN_KEY_NAME } = require('./fn-monitor');
 
 let uIOhook = null;
 let UiohookKey = null;
@@ -40,15 +41,20 @@ const LEGACY_HOLD_ALIASES = {
 };
 
 // Friendly labels for keys whose raw uiohook name is ambiguous about side.
+const IS_MAC = process.platform === 'darwin';
 const PRETTY_LABELS = {
-  Alt: 'Left Alt',
-  AltRight: 'Right Alt',
-  Ctrl: 'Left Ctrl',
-  CtrlRight: 'Right Ctrl',
-  Shift: 'Left Shift',
-  ShiftRight: 'Right Shift',
-  Meta: process.platform === 'darwin' ? 'Left Command' : 'Left Win',
-  MetaRight: process.platform === 'darwin' ? 'Right Command' : 'Right Win',
+  // Driven by the native helper, not uiohook - see fn-monitor.js.
+  GlobeFn: 'Globe / Fn (🌐)',
+  // Apple names these differently to the uiohook identifiers, and showing
+  // "Alt" to a Mac user sends them hunting for a key that isn't on the keyboard.
+  Alt: IS_MAC ? 'Left Option (⌥)' : 'Left Alt',
+  AltRight: IS_MAC ? 'Right Option (⌥)' : 'Right Alt',
+  Ctrl: IS_MAC ? 'Left Control (⌃)' : 'Left Ctrl',
+  CtrlRight: IS_MAC ? 'Right Control (⌃)' : 'Right Ctrl',
+  Shift: IS_MAC ? 'Left Shift (⇧)' : 'Left Shift',
+  ShiftRight: IS_MAC ? 'Right Shift (⇧)' : 'Right Shift',
+  Meta: IS_MAC ? 'Left Command (⌘)' : 'Left Win',
+  MetaRight: IS_MAC ? 'Right Command (⌘)' : 'Right Win',
   Space: 'Space',
   Backquote: '` (backquote)',
   BracketLeft: '[',
@@ -235,6 +241,12 @@ class HotkeyManager {
 
     if (!holdEnabled) {
       status.hold.ok = true; // disabled on purpose
+    } else if (holdHotkey === FN_KEY_NAME) {
+      // Globe/Fn never reaches the keyboard hook - it is a modifier flag, not a
+      // key - so it is driven by the native helper instead of uiohook.
+      const res = this._startFnMonitor();
+      status.hold.ok = res.ok;
+      status.hold.error = res.ok ? null : res.error;
     } else if (!uIOhook) {
       status.hold.error = `Global key hook unavailable${this.hookLoadError ? ` (${this.hookLoadError})` : ''}. Hold-to-talk cannot run; use the toggle shortcut.`;
     } else if (!holdHotkey) {
@@ -311,6 +323,24 @@ class HotkeyManager {
     return status;
   }
 
+  /** Bring up the native Globe/Fn listener and route it to the hold callbacks. */
+  _startFnMonitor() {
+    if (!fnAvailable()) {
+      return { ok: false, error: 'Globe/Fn is not available in this build. Pick another hold key.' };
+    }
+    if (this.fnMonitor) this.fnMonitor.stop();
+    this.fnMonitor = new FnMonitor({
+      onPress: () => { this.lastHookEventAt = Date.now(); this.holding = true; this.callbacks.onHoldPress?.(); },
+      onRelease: () => { this.lastHookEventAt = Date.now(); this.holding = false; this.callbacks.onHoldRelease?.(); },
+      onError: (msg) => this.callbacks.onStatus?.(
+        { hold: { enabled: true, ok: false, error: msg, label: labelForName(FN_KEY_NAME) },
+          toggle: { enabled: false, ok: true, error: null, label: '' } },
+        'globe/fn'
+      ),
+    });
+    return this.fnMonitor.start();
+  }
+
   startHealthMonitor() {
     if (this.healthTimer) return;
     this.healthTimer = setInterval(() => this._healthCheck(), HEALTH_INTERVAL_MS);
@@ -320,6 +350,9 @@ class HotkeyManager {
   _healthCheck() {
     const cfg = this.lastConfig;
     if (!cfg || !cfg.holdEnabled || !uIOhook) return;
+    // Globe/Fn doesn't use uiohook at all, so the "hook looks dead" heuristics
+    // below would re-arm it forever. The helper re-enables its own tap.
+    if (cfg.holdHotkey === FN_KEY_NAME) return;
     if (!uioStarted) {
       this.rearm('hook not running');
       return;
@@ -431,6 +464,9 @@ class HotkeyManager {
 
   unregister() {
     try { globalShortcut.unregisterAll(); } catch {}
+    // The Fn helper is a child process - leaving it running would keep firing
+    // hold events after the key has been reassigned.
+    if (this.fnMonitor) { this.fnMonitor.stop(); this.fnMonitor = null; }
     this.toggleAccel = null;
     this.holdCode = null;
     this.holding = false;
@@ -449,11 +485,39 @@ class HotkeyManager {
 
 // Kept for backwards compatibility with the old <select> in Settings; the UI
 // now uses press-to-map, but this is still a useful "common keys" list.
-const HOLD_KEY_CHOICES = ['AltRight', 'CtrlRight', 'ShiftRight', 'MetaRight', 'CapsLock', 'ScrollLock', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20'];
+/**
+ * Keys offered in the hold-key picker, best-first for the platform.
+ *
+ * Mac keyboards have no Scroll Lock, and the Globe/Fn key is deliberately
+ * absent: macOS reports it as a modifier flag rather than a key, so libuiohook
+ * never emits an event for it and it can't be bound here at all. Listing it
+ * would give a choice that silently never fires.
+ */
+const MAC_HOLD_KEYS = ['MetaRight', 'AltRight', 'CtrlRight', 'ShiftRight', 'CapsLock',
+  'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20'];
+
+/**
+ * Globe/Fn is only offered when its helper binary actually shipped in this
+ * build - listing a key that cannot fire is worse than not listing it.
+ */
+function holdKeyChoices() {
+  if (!IS_MAC) {
+    return ['AltRight', 'CtrlRight', 'ShiftRight', 'MetaRight', 'CapsLock', 'ScrollLock',
+      'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20'];
+  }
+  return fnAvailable() ? [FN_KEY_NAME, ...MAC_HOLD_KEYS] : MAC_HOLD_KEYS;
+}
+
+// Kept for callers that want the static list; the function above is preferred.
+const HOLD_KEY_CHOICES = IS_MAC ? MAC_HOLD_KEYS
+  : ['AltRight', 'CtrlRight', 'ShiftRight', 'MetaRight', 'CapsLock', 'ScrollLock',
+     'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20'];
 
 module.exports = {
   HotkeyManager,
   HOLD_KEY_CHOICES,
+  holdKeyChoices,
+  FN_KEY_NAME,
   LEGACY_HOLD_ALIASES,
   nameForKeycode,
   keycodeForName,

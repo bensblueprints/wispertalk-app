@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, dialog, powerMonitor, Notification } = require('electron');
 const path = require('node:path');
 const store = require('./store');
-const { HotkeyManager, HOLD_KEY_CHOICES, labelForName } = require('./hotkey');
+const { HotkeyManager, HOLD_KEY_CHOICES, holdKeyChoices, labelForName } = require('./hotkey');
 const { transcribe } = require('./transcribe');
 const localAsr = require('./local-asr');
 const { cleanup } = require('./postprocess');
@@ -418,7 +418,10 @@ function registerIpc() {
 
   ipcMain.handle('settings:get', () => ({ ...store.getAll() }));
   ipcMain.handle('settings:choices', () => ({
-    holdKeys: HOLD_KEY_CHOICES,
+    // name + display label together, so the picker can show "Right Option (⌥)"
+    // rather than the raw uiohook identifier. holdKeyChoices() is used (not the
+    // static list) because Globe/Fn only appears when its helper is present.
+    holdKeys: holdKeyChoices().map(name => ({ name, label: labelForName(name) })),
     hookAvailable: !!hotkey?.hookAvailable,
     hookError: hotkey?.hookLoadError || null,
     localEngineAvailable: localAsr.isAvailable(),

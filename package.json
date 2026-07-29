@@ -1,6 +1,6 @@
 {
   "name": "wispertalk",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "WisperTalk — voice dictation. $49.99 lifetime.",
   "main": "src/main/main.js",
   "author": {
@@ -112,11 +112,21 @@
         "NSAppleEventsUsageDescription": "WisperTalk uses AppleScript to paste transcribed text into the focused application."
       },
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extraResources": [
+        {
+          "from": "build-assets",
+          "to": ".",
+          "filter": [
+            "fn-monitor"
+          ]
+        }
+      ]
     },
     "dmg": {
       "sign": false,
       "writeUpdateInfo": false
-    }
+    },
+    "beforePack": "scripts/build-fn-monitor.js"
   }
 }

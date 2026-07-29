@@ -6,3 +6,4 @@ build/icon.ico
 
 # Offline Whisper weights — fetched at build time by scripts/fetch-models.js
 models/
+build-assets/

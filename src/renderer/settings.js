@@ -234,13 +234,50 @@ async function populateMics({ saved, requestPermission = false } = {}) {
 let choices = {};
 let capturing = null;
 
+/**
+ * Fill the hold-key dropdown from the keys this platform offers. The picker and
+ * the press-to-capture button must always agree: whichever the user touches,
+ * the other has to show the same key or the UI is lying about what is bound.
+ */
+function populateHoldPicker() {
+  const sel = el('holdPicker');
+  if (!sel || !Array.isArray(choices.holdKeys)) return;
+  const current = el('holdHotkey').value || '';
+  sel.innerHTML = '<option value="">Choose a key…</option>';
+  for (const k of choices.holdKeys) {
+    const opt = document.createElement('option');
+    opt.value = k.name;
+    opt.textContent = k.label;
+    sel.appendChild(opt);
+  }
+  // Capture allows ANY physical key, so the bound key may not be in the list.
+  // Append it instead of leaving the dropdown showing the wrong selection.
+  if (current && !choices.holdKeys.some(k => k.name === current)) {
+    const opt = document.createElement('option');
+    opt.value = current;
+    opt.textContent = `${current} (captured)`;
+    sel.appendChild(opt);
+  }
+  sel.value = current;
+}
+
 async function setHoldLabel(name) {
   const btn = el('holdCapture');
+  const sel = el('holdPicker');
+  if (sel) {
+    if (name && !Array.from(sel.options).some(o => o.value === name)) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = `${name} (captured)`;
+      sel.appendChild(opt);
+    }
+    sel.value = name || '';
+  }
   if (!btn) return;
-  if (!name) { btn.textContent = 'Click, then press any key'; return; }
+  if (!name) { btn.textContent = '…or click here and press any key'; return; }
   let label = name;
   try { label = await window.flow.labelForKey(name); } catch {}
-  btn.textContent = `${label}  —  click to change`;
+  btn.textContent = `${label}  —  or click to capture a different key`;
 }
 
 function beginCaptureUi(btn, text) {
@@ -362,6 +399,7 @@ async function init() {
   await populateMics({ saved: cfg.inputDeviceId });
 
   writeAll(cfg);
+  populateHoldPicker();
   await setHoldLabel(cfg.holdHotkey);
   updateEngineHint();
   await refreshHotkeyStatus();
@@ -375,6 +413,17 @@ async function init() {
     const evt = (node.tagName === 'SELECT' || node.type === 'checkbox') ? 'change' : 'input';
     node.addEventListener(evt, markDirty);
   }
+
+  // Picking from the dropdown binds the key straight away - the hidden field is
+  // what actually gets saved, so it has to be written here too.
+  el('holdPicker')?.addEventListener('change', async (e) => {
+    const name = e.target.value;
+    if (!name) return;
+    el('holdHotkey').value = name;
+    await setHoldLabel(name);
+    el('holdEnabled').checked = true;
+    markDirty();
+  });
 
   el('sttEngine').addEventListener('change', updateEngineHint);
 
