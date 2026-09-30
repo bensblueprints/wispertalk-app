@@ -1,69 +1,82 @@
 const { clipboard } = require('electron');
 const { spawn } = require('node:child_process');
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Windows: PowerShell SendKeys for Ctrl+V
-function sendCtrlV_win() {
-  return new Promise((resolve) => {
-    const ps = spawn('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-WindowStyle', 'Hidden',
-      '-Command',
-      "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')"
-    ], { windowsHide: true });
-    ps.on('exit', () => resolve());
-    ps.on('error', () => resolve());
+function runPaste(command, args, { signal } = {}) {
+  return new Promise(resolve => {
+    let child;
+    let timer;
+    let done = false;
+    const finish = result => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+      resolve(result);
+    };
+    const cancel = () => {
+      child?.kill();
+      finish({ ok: false, cancelled: true });
+    };
+    if (signal?.aborted) return finish({ ok: false, cancelled: true });
+    try {
+      child = spawn(command, args, { windowsHide: true });
+      // Drain pipes so a helper cannot stall on a full output buffer.
+      child.stdout?.resume();
+      child.stderr?.resume();
+      child.on('error', err => finish({ ok: false, error: err.message }));
+      child.on('close', code => finish({ ok: code === 0, code }));
+      signal?.addEventListener('abort', cancel, { once: true });
+      timer = setTimeout(() => {
+        child.kill();
+        finish({ ok: false, error: 'Paste helper timed out' });
+      }, 8000);
+    } catch (err) { finish({ ok: false, error: err.message }); }
   });
 }
 
-// macOS: AppleScript via osascript for Cmd+V
-function sendCmdV_mac() {
-  return new Promise((resolve) => {
-    const args = [
-      '-e',
-      'tell application "System Events" to keystroke "v" using command down'
-    ];
-    const proc = spawn('osascript', args);
-    let errored = false;
-    proc.on('error', () => { errored = true; resolve({ ok: false }); });
-    proc.on('exit', (code) => {
-      if (errored) return;
-      resolve({ ok: code === 0, code });
-    });
-  });
-}
-
-async function pasteText(text, { delayMs = 60, restoreClipboard = true } = {}) {
-  if (!text) return;
-  let prev = null;
-  if (restoreClipboard) {
-    try { prev = clipboard.readText(); } catch { prev = null; }
+// Wait for physical modifiers to be released: sending Ctrl+V while the user
+// still holds Alt/Shift/Win can invoke another shortcut instead of pasting.
+const WINDOWS_PASTE = `
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class WisperKeys { [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key); }'
+Add-Type -AssemblyName System.Windows.Forms
+$deadline = [DateTime]::UtcNow.AddSeconds(3)
+do {
+  $held = $false
+  foreach ($keyCode in @(16,17,18,91,92)) {
+    if (([WisperKeys]::GetAsyncKeyState($keyCode) -band 0x8000) -ne 0) { $held = $true }
   }
+  if (-not $held) { break }
+  Start-Sleep -Milliseconds 25
+} while ([DateTime]::UtcNow -lt $deadline)
+if ($held) { exit 2 }
+[System.Windows.Forms.SendKeys]::SendWait('^v')
+`;
+
+async function pasteText(text, { delayMs = 60, restoreClipboard = false, isCurrent = () => true, signal } = {}) {
+  if (!text || !isCurrent() || signal?.aborted) return { ok: false, cancelled: true };
+  const previous = restoreClipboard ? clipboard.readText() : null;
   clipboard.writeText(text);
-  await sleep(delayMs);
-
+  await sleep(Math.min(2000, Math.max(60, Number(delayMs) || 60)));
+  if (!isCurrent() || signal?.aborted) return { ok: false, cancelled: true };
+  // Don't paste unrelated data if the user copied something during the delay.
+  if (clipboard.readText() !== text) return { ok: false, clipboardChanged: true };
+  let result;
   if (process.platform === 'win32') {
-    await sendCtrlV_win();
+    result = await runPaste('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', WINDOWS_PASTE], { signal });
   } else if (process.platform === 'darwin') {
-    const r = await sendCmdV_mac();
-    if (!r.ok) {
-      // Fallback: text is already on clipboard. The user can paste manually.
-      // (Most likely cause: Accessibility permission not granted to WisperTalk.)
-      console.warn('osascript paste failed (likely missing Accessibility permission). Text left on clipboard.');
-    }
+    result = await runPaste('osascript', ['-e', 'tell application "System Events" to keystroke "v" using command down'], { signal });
   } else {
-    // Linux / others: leave on clipboard. Implementing xdotool/wtype is out of scope.
-    console.warn('Auto-paste not supported on this platform; text left on clipboard.');
+    result = { ok: false, error: 'Automatic paste is not supported on this platform' };
   }
-
-  if (restoreClipboard && prev !== null) {
-    await sleep(150);
-    try { clipboard.writeText(prev); } catch {}
+  // The default leaves the transcript available for manual paste. Optional
+  // restoration is never allowed after a helper failure or a new user copy.
+  if (restoreClipboard && result.ok) {
+    await sleep(1000);
+    if (isCurrent() && !signal?.aborted && clipboard.readText() === text) clipboard.writeText(previous);
   }
+  return result;
 }
-
 module.exports = { pasteText };

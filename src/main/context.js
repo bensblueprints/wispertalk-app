@@ -30,10 +30,10 @@ Add-Type $sig -ErrorAction SilentlyContinue
 $h = [Win]::GetForegroundWindow()
 $sb = New-Object System.Text.StringBuilder 512
 [void][Win]::GetWindowText($h, $sb, 512)
-$pid = 0
-[void][Win]::GetWindowThreadProcessId($h, [ref]$pid)
+$foregroundProcessId = 0
+[void][Win]::GetWindowThreadProcessId($h, [ref]$foregroundProcessId)
 $proc = ''
-try { $proc = (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName } catch {}
+try { $proc = (Get-Process -Id $foregroundProcessId -ErrorAction SilentlyContinue).ProcessName } catch {}
 "$proc | $($sb.ToString())"
 `;
 

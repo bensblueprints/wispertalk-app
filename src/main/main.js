@@ -15,7 +15,7 @@ const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-128.png');
 // If the renderer hasn't handed back audio this long after we asked it to stop,
 // something went wrong down there (crashed window, MediaRecorder that never
 // fired onstop, IPC lost). Reset rather than sit in `busy` forever.
-const AUDIO_HANDBACK_TIMEOUT_MS = 5000;
+const AUDIO_HANDBACK_TIMEOUT_MS = 15000;
 
 let tray = null;
 let overlayWin = null;
@@ -26,6 +26,8 @@ let busy = false;
 let overlayReady = false;
 let audioWatchdog = null;
 let lastHotkeyStatus = null;
+let sessionSequence = 0;
+let activeSession = null;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -203,7 +205,8 @@ function createOverlayWindow() {
       preload: path.join(__dirname, '..', 'preload', 'overlay-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false
     }
   });
   overlayWin.setAlwaysOnTop(true, 'screen-saver');
@@ -281,6 +284,7 @@ function rebuildTrayMenu() {
 
 function labelForState() {
   if (busy) return 'Processing…';
+  if (state === 'starting') return 'Opening microphone…';
   if (state === 'recording') return 'Recording…';
   return 'Ready';
 }
@@ -298,6 +302,10 @@ function setBusy(next) {
 /** Single place that puts the app back to idle, whatever went wrong. */
 function resetPipeline({ message = null, kind = 'info', silent = false } = {}) {
   clearAudioWatchdog();
+  activeSession?.controller.abort();
+  activeSession = null;
+  sendToOverlay('recorder:abort');
+  hotkey?.clearHolding();
   state = 'idle';
   busy = false;
   hideOverlay();
@@ -351,7 +359,7 @@ function openSettings() {
 
 function handleToggle() {
   if (busy) return;
-  if (state === 'recording') stopRecording();
+  if (state === 'recording' || state === 'starting') stopRecording();
   else startRecording();
 }
 
@@ -362,11 +370,11 @@ function handleHoldPress() {
 }
 
 function handleHoldRelease() {
-  if (state === 'recording') stopRecording();
+  if (state === 'recording' || state === 'starting') stopRecording();
 }
 
 function startRecording() {
-  if (state === 'recording' || busy) return; // no double-start, no start-while-busy
+  if (state !== 'idle' || busy) return;
   if (!overlayAlive()) {
     // Starting up, or the renderer died. Don't enter `recording` — that state
     // could never be left, because nothing downstream would ever reply.
@@ -374,7 +382,15 @@ function startRecording() {
     hotkey?.clearHolding();
     return;
   }
-  setState('recording');
+  activeSession = { id: ++sessionSequence, config: store.getAll(), processing: false, controller: new AbortController() };
+  setState('starting');
+  clearAudioWatchdog();
+  const startingSession = activeSession;
+  audioWatchdog = setTimeout(() => {
+    if (activeSession === startingSession && state === 'starting') {
+      resetPipeline({ message: 'The microphone did not become ready. Check microphone access and try again.', kind: 'warn' });
+    }
+  }, 12000);
   if (store.get('showOverlay')) {
     // showInactive() — NOT show(). On macOS show() activates WisperTalk as the frontmost
     // app, stealing keyboard focus from the text field the user is dictating into (they'd
@@ -384,6 +400,7 @@ function startRecording() {
     sendToOverlay('overlay:show', { mode: 'recording' });
   }
   sendToOverlay('recorder:start', {
+    sessionId: activeSession.id,
     inputDeviceId: store.get('inputDeviceId') || '',
     // The local engine needs decoded PCM; skip the work when using Groq.
     wantPcm: store.get('sttEngine') === 'local'
@@ -391,11 +408,11 @@ function startRecording() {
 }
 
 function stopRecording() {
-  if (state !== 'recording') return;
+  if (state !== 'recording' && state !== 'starting') return;
   setState('idle');
   setBusy(true);
   sendToOverlay('overlay:show', { mode: 'processing' });
-  const delivered = sendToOverlay('recorder:stop');
+  const delivered = sendToOverlay('recorder:stop', { sessionId: activeSession.id });
   if (!delivered) {
     resetPipeline({ message: 'Recorder was not reachable. Ready to try again.', kind: 'warn' });
     return;
@@ -441,7 +458,7 @@ function registerIpc() {
     return true;
   });
   ipcMain.handle('hotkey:status', () => lastHotkeyStatus);
-  ipcMain.handle('hotkey:rearm', () => applyHotkeys({ announceFailures: false }));
+  ipcMain.handle('hotkey:rearm', () => hotkey?.rearm('settings'));
 
   ipcMain.handle('settings:set', (_e, updates) => {
     const next = store.set(updates || {});
@@ -463,53 +480,71 @@ function registerIpc() {
   });
   ipcMain.handle('history:list', () => store.get('history') || []);
 
-  ipcMain.on('recorder:audio', async (_e, payload) => {
+  const currentRecorder = (event, payload) => activeSession &&
+    payload?.sessionId === activeSession.id && event.sender === overlayWin?.webContents;
+  ipcMain.on('recorder:ready', (event, payload) => {
+    if (!currentRecorder(event, payload) || state !== 'starting') return;
+    clearAudioWatchdog();
+    setState('recording');
+  });
+  ipcMain.on('recorder:warning', (event, payload) => {
+    if (currentRecorder(event, payload)) sendToast({ kind: 'warn', message: payload.message });
+  });
+  ipcMain.on('recorder:audio', async (event, payload) => {
+    if (!currentRecorder(event, payload) || !busy || activeSession.processing) return;
+    const recordingSession = activeSession;
+    recordingSession.processing = true;
     clearAudioWatchdog();
     const { audioBuffer, mimeType, pcm } = payload || {};
     try {
       await processAudio({
+        recordingSession,
         buffer: audioBuffer ? Buffer.from(audioBuffer) : null,
         mimeType: mimeType || 'audio/webm',
         pcm: pcm ? new Float32Array(pcm instanceof ArrayBuffer ? pcm : pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength)) : null
       });
     } catch (err) {
       console.error('processAudio failed:', err);
-      sendToast({ kind: 'error', message: err.message || String(err) });
+      if (activeSession === recordingSession) sendToast({ kind: 'error', message: err.message || String(err) });
     } finally {
       // Whatever happened above — success, throw, empty buffer, empty
       // transcript — we always land back at idle with the overlay gone.
-      resetPipeline();
+      if (activeSession === recordingSession) resetPipeline();
     }
   });
 
   // The renderer had nothing to give us (tap too short to even open the mic,
   // MediaRecorder produced zero chunks, decode failed). Previously this case
   // sent nothing at all and left the app stuck in `busy` forever.
-  ipcMain.on('recorder:empty', (_e, reason) => {
+  ipcMain.on('recorder:empty', (event, payload) => {
+    if (!currentRecorder(event, payload) || activeSession.processing) return;
     clearAudioWatchdog();
-    resetPipeline({ message: reason ? `No audio captured (${reason}).` : 'No audio captured.', kind: 'info' });
+    resetPipeline({ message: payload.reason || 'No audio captured.', kind: 'warn' });
   });
 
-  ipcMain.on('recorder:cancel', () => {
+  ipcMain.on('recorder:cancel', (event, payload) => {
+    if (!currentRecorder(event, payload)) return;
     resetPipeline();
   });
 
-  ipcMain.on('recorder:error', (_e, msg) => {
-    resetPipeline({ message: `Recorder: ${msg}`, kind: 'error' });
+  ipcMain.on('recorder:error', (event, payload) => {
+    if (!currentRecorder(event, payload) || activeSession.processing) return;
+    resetPipeline({ message: `Recorder: ${payload.message}`, kind: 'error' });
   });
 }
 
-async function processAudio({ buffer, mimeType, pcm }) {
-  const cfg = store.getAll();
+async function processAudio({ buffer, mimeType, pcm, recordingSession }) {
+  const cfg = recordingSession.config;
+  const isCurrent = () => activeSession === recordingSession;
   const useLocal = cfg.sttEngine === 'local';
 
   if (useLocal) {
     if (!pcm || pcm.length < localAsr.SAMPLE_RATE * 0.25) {
-      sendToast({ kind: 'info', message: 'No audio captured.' });
+      sendToast({ kind: 'warn', message: 'Recording was too short. Wait for the recording timer before speaking.' });
       return;
     }
   } else if (!buffer || buffer.length < 1000) {
-    sendToast({ kind: 'info', message: 'No audio captured.' });
+    sendToast({ kind: 'warn', message: 'No audio captured. Check your selected microphone in Settings.' });
     return;
   }
 
@@ -517,6 +552,7 @@ async function processAudio({ buffer, mimeType, pcm }) {
   if (cfg.useAppContext) {
     contextHint = await getForegroundContext().catch(() => '');
   }
+  if (!isCurrent()) return;
 
   let raw = '';
   if (useLocal) {
@@ -535,8 +571,9 @@ async function processAudio({ buffer, mimeType, pcm }) {
     });
   }
 
+  if (!isCurrent()) return;
   if (!raw) {
-    sendToast({ kind: 'info', message: 'Heard nothing.' });
+    sendToast({ kind: 'warn', message: 'No speech was recognized. Check your microphone and try again.' });
     return;
   }
 
@@ -556,16 +593,16 @@ async function processAudio({ buffer, mimeType, pcm }) {
         model: cfg.llmModel
       });
     } catch (err) {
+      if (!isCurrent()) return;
       console.warn('Cleanup failed, falling back to raw:', err.message);
       sendToast({ kind: 'warn', message: `Cleanup failed: ${err.message}` });
       final = raw;
     }
   }
 
-  if (!final.trim()) {
-    sendToast({ kind: 'info', message: 'Heard nothing.' });
-    return;
-  }
+  if (!isCurrent()) return;
+  // A failed/empty cleanup response must not erase a valid transcription.
+  if (!final.trim()) final = raw;
 
   store.pushHistory({
     at: new Date().toISOString(),
@@ -575,7 +612,14 @@ async function processAudio({ buffer, mimeType, pcm }) {
   });
 
   if (cfg.autoPaste) {
-    await pasteText(final, { delayMs: cfg.pasteDelayMs ?? 60 });
+    const result = await pasteText(final, { delayMs: cfg.pasteDelayMs ?? 60, isCurrent, signal: recordingSession.controller.signal });
+    if (!isCurrent()) return;
+    if (!result.ok) {
+      sendToast({ kind: 'warn', message: result.clipboardChanged
+        ? 'Clipboard changed before pasting. Your transcription is saved in Settings history.'
+        : 'Automatic paste failed. Your transcription is on the clipboard; press Ctrl+V (Cmd+V on Mac) to paste it.' });
+      return;
+    }
   }
   sendToast({ kind: 'success', message: final.length > 80 ? final.slice(0, 80) + '…' : final });
 }

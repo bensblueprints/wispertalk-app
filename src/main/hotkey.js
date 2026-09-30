@@ -182,10 +182,10 @@ function acceleratorFromEvent(e) {
 
 // ---------------------------------------------------------------------------
 
-const HEALTH_INTERVAL_MS = 60_000;
+const HEALTH_INTERVAL_MS = 10_000;
 // If the user is demonstrably at the keyboard/mouse but uiohook has been silent
 // this long, the OS almost certainly dropped our low-level hook.
-const SILENCE_BEFORE_REARM_MS = 180_000;
+const SILENCE_BEFORE_REARM_MS = 30_000;
 const CAPTURE_TIMEOUT_MS = 15_000;
 
 class HotkeyManager {
@@ -311,6 +311,7 @@ class HotkeyManager {
    */
   rearm(reason = 'manual') {
     console.log(`[hotkey] re-arming (${reason})`);
+    if (this.holding) this.callbacks.onHoldRelease?.();
     this.holding = false;
     if (uIOhook && uioStarted) {
       try { uIOhook.stop(); } catch (err) { console.warn('[hotkey] stop during re-arm failed:', err.message); }
@@ -349,7 +350,7 @@ class HotkeyManager {
 
   _healthCheck() {
     const cfg = this.lastConfig;
-    if (!cfg || !cfg.holdEnabled || !uIOhook) return;
+    if (!cfg || !cfg.holdEnabled || !uIOhook || this.capture || this.holding) return;
     // Globe/Fn doesn't use uiohook at all, so the "hook looks dead" heuristics
     // below would re-arm it forever. The helper re-enables its own tap.
     if (cfg.holdHotkey === FN_KEY_NAME) return;
@@ -463,6 +464,7 @@ class HotkeyManager {
   }
 
   unregister() {
+    if (this.holding) this.callbacks.onHoldRelease?.();
     try { globalShortcut.unregisterAll(); } catch {}
     // The Fn helper is a child process - leaving it running would keep firing
     // hold events after the key has been reassigned.
