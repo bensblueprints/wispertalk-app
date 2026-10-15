@@ -9,6 +9,9 @@ const { cleanup } = require('./postprocess');
 const { pasteText } = require('./paste');
 const { getForegroundContext } = require('./context');
 const { generateKey, generateResellerKey, parseKey, validateKey } = require('./license-key');
+const keyState = require('./key-state');
+const { compareVersions } = require('./version-compare');
+const { spawn } = require('node:child_process');
 const { isTrusted, ensureAccessibility } = require('./mac-accessibility');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-128.png');
@@ -17,6 +20,21 @@ const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-128.png');
 // something went wrong down there (crashed window, MediaRecorder that never
 // fired onstop, IPC lost). Reset rather than sit in `busy` forever.
 const AUDIO_HANDBACK_TIMEOUT_MS = 15000;
+
+// Public releases repo for the in-app update check.
+const RELEASES_REPO = 'bensblueprints/wispertalk-releases';
+
+// Session-level stuck-recording guard (Windows). A hold-initiated session is
+// watched against the PHYSICAL key state (key-state.js, GetAsyncKeyState):
+// SESSION_KEY_WATCH_UP_POLLS consecutive physically-UP answers mean the
+// key-up event was lost — the session ends via the normal release path.
+// Physically DOWN never interrupts: no time cap on dictation, ever.
+const SESSION_KEY_WATCH_DELAY_MS = 500;
+const SESSION_KEY_WATCH_POLL_MS = 250;
+const SESSION_KEY_WATCH_UP_POLLS = 2;
+const SESSION_KEY_WATCH_MAX_FAILURES = 3;
+// Hold-key names -> Windows virtual-key code (VK_RMENU = 0xA5 = right Alt).
+const HOLD_KEY_VK = { AltRight: 0xA5, RightAlt: 0xA5 };
 
 let tray = null;
 let overlayWin = null;
@@ -29,6 +47,10 @@ let state = 'idle';
 let busy = false;
 let overlayReady = false;
 let audioWatchdog = null;
+let keyWatchTimer = null;
+let keyWatchUpPolls = 0;
+let keyWatchFailures = 0;
+let keyWatchBusy = false;
 let lastHotkeyStatus = null;
 let sessionSequence = 0;
 let activeSession = null;
@@ -110,11 +132,6 @@ function loadStoredKey() {
   } catch { return null; }
 }
 
-function maskKey(key) {
-  const n = String(key).trim().toUpperCase();
-  return `${n.split('-')[0]}-…-${n.slice(-3)}`;
-}
-
 function gateLicenseKey() {
   const stored = loadStoredKey();
   if (stored && validateKey(stored)) return Promise.resolve(true);
@@ -179,7 +196,7 @@ function registerLicenseKeyIpc() {
     const key = loadStoredKey();
     if (!key || !validateKey(key)) return { activated: false };
     const parsed = parseKey(key);
-    return { activated: true, key: maskKey(key), isMaster: parsed.tier === 'master', tier: parsed.tier, holder: parsed.holder };
+    return { activated: true, key, isMaster: parsed.tier === 'master', tier: parsed.tier, holder: parsed.holder };
   });
   ipcMain.handle('license-key:deactivate', () => {
     try { fs.unlinkSync(licenseStatePath()); } catch {}
@@ -416,6 +433,7 @@ function setBusy(next) {
 /** Single place that puts the app back to idle, whatever went wrong. */
 function resetPipeline({ message = null, kind = 'info', silent = false } = {}) {
   clearAudioWatchdog();
+  clearSessionKeyWatch();
   activeSession?.controller.abort();
   activeSession = null;
   sendToOverlay('recorder:abort');
@@ -480,14 +498,14 @@ function handleToggle() {
 function handleHoldPress() {
   if (busy) return;
   if (state !== 'idle') return;
-  startRecording();
+  startRecording({ viaHold: true });
 }
 
 function handleHoldRelease() {
   if (state === 'recording' || state === 'starting') stopRecording();
 }
 
-function startRecording() {
+function startRecording({ viaHold = false } = {}) {
   if (state !== 'idle' || busy) return;
   if (!overlayAlive()) {
     // Starting up, or the renderer died. Don't enter `recording` — that state
@@ -496,6 +514,7 @@ function startRecording() {
     hotkey?.clearHolding();
     return;
   }
+  try { overlayWin.setIgnoreMouseEvents(true); } catch {} // transcript card's clickable window is over
   activeSession = { id: ++sessionSequence, config: store.getAll(), processing: false, controller: new AbortController() };
   setState('starting');
   clearAudioWatchdog();
@@ -519,10 +538,15 @@ function startRecording() {
     // The local engine needs decoded PCM; skip the work when using Groq.
     wantPcm: store.get('sttEngine') === 'local'
   });
+  // Hold-initiated sessions get the physical-key watch — the guarantee that a
+  // lost key-up can never leave the app recording. Covers every drop race at
+  // once, because it hangs off the SESSION, not the hotkey's holding flag.
+  if (viaHold) armSessionKeyWatch(store.get('holdHotkey'));
 }
 
 function stopRecording() {
   if (state !== 'recording' && state !== 'starting') return;
+  clearSessionKeyWatch();
   setState('idle');
   setBusy(true);
   sendToOverlay('overlay:show', { mode: 'processing' });
@@ -532,6 +556,75 @@ function stopRecording() {
     return;
   }
   armAudioWatchdog();
+}
+
+/**
+ * While a hold-initiated session is live, verify the PHYSICAL hold key.
+ * Two consecutive physically-UP polls => the key-up was lost: end the session
+ * through handleHoldRelease(), the exact path a real key-up takes. Query
+ * failures fail toward NOT cutting dictation (log, then stop watching).
+ */
+function armSessionKeyWatch(hotkeyName) {
+  clearSessionKeyWatch();
+  if (process.platform !== 'win32') return; // macOS keeps rearm-based recovery
+  const vk = HOLD_KEY_VK[hotkeyName];
+  if (vk == null) return; // un-pollable trigger key — the watch can't help
+  keyWatchUpPolls = 0;
+  keyWatchFailures = 0;
+  keyWatchBusy = false;
+  keyWatchTimer = setTimeout(() => {
+    keyWatchTimer = setInterval(() => pollSessionKey(vk), SESSION_KEY_WATCH_POLL_MS);
+    if (keyWatchTimer.unref) keyWatchTimer.unref();
+    pollSessionKey(vk);
+  }, SESSION_KEY_WATCH_DELAY_MS);
+  if (keyWatchTimer.unref) keyWatchTimer.unref();
+}
+
+async function pollSessionKey(vk) {
+  if (state !== 'recording' && state !== 'starting') { clearSessionKeyWatch(); return; }
+  if (keyWatchBusy) return; // a slow query must not stack up
+  keyWatchBusy = true;
+  try {
+    const down = await keyState.query(vk);
+    if (state !== 'recording' && state !== 'starting') { clearSessionKeyWatch(); return; }
+    keyWatchFailures = 0;
+    if (down) { keyWatchUpPolls = 0; return; } // physically held — never interrupt
+    keyWatchUpPolls++;
+    if (keyWatchUpPolls >= SESSION_KEY_WATCH_UP_POLLS) {
+      console.warn('[session] hold key is physically UP but a session is live — key-up was lost; ending via the normal release path');
+      clearSessionKeyWatch();
+      hotkey?.clearHolding(); // drop a stale flag so the next press works
+      handleHoldRelease();    // exact same path a real key-up takes
+    }
+  } catch (err) {
+    keyWatchFailures++;
+    if (keyWatchFailures >= SESSION_KEY_WATCH_MAX_FAILURES) {
+      console.warn('[session] key-state helper repeatedly unavailable — watch stopped; dictation is never cut:', err?.message || err);
+      clearSessionKeyWatch();
+    }
+  } finally {
+    keyWatchBusy = false;
+  }
+}
+
+function clearSessionKeyWatch() {
+  if (keyWatchTimer) { clearTimeout(keyWatchTimer); clearInterval(keyWatchTimer); keyWatchTimer = null; }
+}
+
+/**
+ * After a successful paste, show the transcript on the overlay for a moment
+ * so the user can copy it. Click-through is disabled while the card is up
+ * (the Copy button needs real clicks); showInactive() — never show() — keeps
+ * keyboard focus in the window the text was just pasted into, and the window
+ * is focusable:false so it cannot grab focus at all.
+ */
+function showTranscriptCard(text) {
+  if (!text || !overlayWin || overlayWin.isDestroyed()) return;
+  try {
+    overlayWin.setIgnoreMouseEvents(false);
+    overlayWin.showInactive();
+    sendToOverlay('overlay:transcript', { text });
+  } catch {}
 }
 
 function hideOverlay() {
@@ -546,6 +639,51 @@ function hideOverlay() {
 function registerIpc() {
   ipcMain.handle('shell:open', (_e, url) => shell.openExternal(url));
   ipcMain.handle('app:quit', () => app.quit());
+
+  ipcMain.handle('app:version', () => app.getVersion());
+
+  // Update check against the public releases repo (no auth; GitHub requires a
+  // User-Agent). Deliberately simple — no electron-updater, no new deps.
+  ipcMain.handle('app:checkUpdates', async () => {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, {
+        headers: { 'User-Agent': 'WisperTalk-Update-Check', Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(10_000)
+      });
+      if (!res.ok) return { status: 'error' };
+      const rel = await res.json();
+      const latest = String(rel.tag_name || '').replace(/^v/i, '');
+      if (!latest) return { status: 'error' };
+      if (compareVersions(latest, app.getVersion()) <= 0) return { status: 'up-to-date' };
+      // The installer, not the portable build; fall back to the release page.
+      const asset = (rel.assets || []).find(a => /^WisperTalk[ .]Setup.*\.exe$/i.test(a?.name || ''));
+      return { status: 'available', version: latest, url: asset?.browser_download_url || rel.html_url, name: rel.name || `WisperTalk ${latest}` };
+    } catch {
+      return { status: 'error' };
+    }
+  });
+
+  ipcMain.handle('app:downloadUpdate', async (_e, url) => {
+    try {
+      // Only ever fetch from our own releases repo (redirects after this are
+      // GitHub's own CDN, which fetch follows itself).
+      if (typeof url !== 'string' || !url.startsWith(`https://github.com/${RELEASES_REPO}/`)) {
+        return { ok: false, error: 'Refused: not a WisperTalk releases URL.' };
+      }
+      const res = await fetch(url, { headers: { 'User-Agent': 'WisperTalk-Update-Check' }, signal: AbortSignal.timeout(120_000) });
+      if (!res.ok || !res.body) return { ok: false, error: `Download failed (HTTP ${res.status}).` };
+      const dest = path.join(app.getPath('temp'), 'WisperTalk-Setup-update.exe');
+      const { Readable } = require('node:stream');
+      const { pipeline } = require('node:stream/promises');
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(dest));
+      // Interactive installer — the user clicks through; the app quits so files can be replaced.
+      spawn(dest, [], { detached: true, stdio: 'ignore' }).unref();
+      app.quit();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message || String(err) };
+    }
+  });
 
   ipcMain.handle('settings:get', () => ({ ...store.getAll() }));
   ipcMain.handle('settings:choices', () => ({
@@ -641,6 +779,14 @@ function registerIpc() {
     resetPipeline();
   });
 
+  // Transcript card dismissed (auto-timeout, Copy click, or a new recording)
+  // — restore click-through and hide the overlay.
+  ipcMain.on('overlay:transcript-done', (event) => {
+    if (event.sender !== overlayWin?.webContents) return;
+    try { overlayWin.setIgnoreMouseEvents(true); } catch {}
+    hideOverlay();
+  });
+
   ipcMain.on('recorder:error', (event, payload) => {
     if (!currentRecorder(event, payload) || activeSession.processing) return;
     resetPipeline({ message: `Recorder: ${payload.message}`, kind: 'error' });
@@ -725,6 +871,7 @@ async function processAudio({ buffer, mimeType, pcm, recordingSession }) {
     context: contextHint
   });
 
+  let pasted = false;
   if (cfg.autoPaste) {
     const result = await pasteText(final, { delayMs: cfg.pasteDelayMs ?? 60, isCurrent, signal: recordingSession.controller.signal });
     if (!isCurrent()) return;
@@ -734,7 +881,11 @@ async function processAudio({ buffer, mimeType, pcm, recordingSession }) {
         : 'Automatic paste failed. Your transcription is on the clipboard; press Ctrl+V (Cmd+V on Mac) to paste it.' });
       return;
     }
+    pasted = true;
   }
+  // The dictated text stays visible for a moment so the user can re-copy it.
+  // This complements paste, never replaces it — failures keep the clipboard toast.
+  if (pasted) showTranscriptCard(final);
   sendToast({ kind: 'success', message: final.length > 80 ? final.slice(0, 80) + '…' : final });
 }
 

@@ -1,6 +1,48 @@
 const card = document.getElementById('card');
 const label = document.getElementById('label');
 const bars = document.querySelectorAll('.bars span');
+const transcriptCard = document.getElementById('transcriptCard');
+const transcriptText = document.getElementById('transcriptText');
+const transcriptCopy = document.getElementById('transcriptCopy');
+
+// Dictation-done card: the transcript, copyable, auto-dismissing after 8s.
+// Complements paste — the text was already pasted; this is a re-copy surface.
+const TRANSCRIPT_DISMISS_MS = 8000;
+let transcriptTimer = null;
+
+function hideTranscriptCard() {
+  clearTimeout(transcriptTimer);
+  transcriptTimer = null;
+  transcriptCard.classList.add('hidden');
+}
+
+function dismissTranscript() {
+  if (transcriptCard.classList.contains('hidden')) return;
+  hideTranscriptCard();
+  window.flow.transcriptDone?.(); // main restores click-through and hides the window
+}
+
+function showTranscript(text) {
+  transcriptText.textContent = text;
+  transcriptCard.classList.remove('hidden');
+  clearTimeout(transcriptTimer);
+  transcriptTimer = setTimeout(dismissTranscript, TRANSCRIPT_DISMISS_MS);
+}
+
+transcriptCopy?.addEventListener?.('click', async () => {
+  try {
+    await navigator.clipboard.writeText(transcriptText.textContent);
+  } catch {
+    // Clipboard API unavailable — select the text and stay open for Ctrl+C.
+    const range = document.createRange();
+    range.selectNodeContents(transcriptText);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return;
+  }
+  dismissTranscript(); // a successful Copy closes the card immediately
+});
 
 // Each callback owns a session: late microphone/decode callbacks cannot touch
 // a newer recording or reply on behalf of a newer hotkey press.
@@ -62,6 +104,7 @@ function microphoneError(err) {
   return err.message || String(err);
 }
 async function startRecording(opts = {}) {
+  hideTranscriptCard(); // a new recording replaces the done card
   if (active) abort();
   const session = { id: opts.sessionId, state: 'starting', chunks: [], done: false, wantPcm: !!opts.wantPcm };
   active = session;
@@ -153,6 +196,7 @@ function abort() {
   if (session) { session.done = true; dispose(session); }
   hide();
 }
+window.flow.onTranscript?.(payload => { if (payload?.text) showTranscript(payload.text); });
 window.flow.onStart(startRecording);
 window.flow.onStop(stopRecording);
 window.flow.onShow(payload => setMode(payload?.mode || 'recording'));

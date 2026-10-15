@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('flow', {
   onStop: (cb) => ipcRenderer.on('recorder:stop', (_e, payload) => cb(payload || {})),
   onShow: (cb) => ipcRenderer.on('overlay:show', (_e, payload) => cb(payload)),
   onHide: (cb) => ipcRenderer.on('overlay:hide', cb),
+  onTranscript: (cb) => ipcRenderer.on('overlay:transcript', (_e, payload) => cb(payload || {})),
+  transcriptDone: () => ipcRenderer.send('overlay:transcript-done'),
   onAbort: (cb) => ipcRenderer.on('recorder:abort', cb),
   sendAudio: (payload) => ipcRenderer.send('recorder:audio', payload),
   ready: (payload) => ipcRenderer.send('recorder:ready', payload),

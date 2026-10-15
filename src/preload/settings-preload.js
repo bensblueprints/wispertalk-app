@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('flow', {
   generateLicenseKey: (name) => ipcRenderer.invoke('license-key:generate', name),
   generateResellerKey: (name) => ipcRenderer.invoke('license-key:generateReseller', name),
   quitApp: () => ipcRenderer.invoke('app:quit'),
+  getVersion: () => ipcRenderer.invoke('app:version'),
+  checkUpdates: () => ipcRenderer.invoke('app:checkUpdates'),
+  downloadUpdate: (url) => ipcRenderer.invoke('app:downloadUpdate', url),
   // Press-to-map hotkey capture
   captureHotkey: (mode) => ipcRenderer.invoke('hotkey:capture', mode),
   cancelCapture: () => ipcRenderer.invoke('hotkey:capture-cancel'),

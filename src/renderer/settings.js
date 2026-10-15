@@ -501,6 +501,23 @@ async function init() {
     }
   });
 
+  el('copyLicKeyBtn').addEventListener('click', async () => {
+    const key = el('licKey').textContent;
+    if (!key || key === '—') return;
+    try {
+      await navigator.clipboard.writeText(key);
+      showToast({ kind: 'success', message: 'License key copied.' });
+    } catch {
+      // Clipboard API unavailable — select the key text for a manual Ctrl+C.
+      const range = document.createRange();
+      range.selectNodeContents(el('licKey'));
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      showToast({ kind: 'warn', message: 'Clipboard unavailable — key selected, press Ctrl+C.' });
+    }
+  });
+
   el('toggleKey').addEventListener('click', () => {
     const k = el('groqApiKey');
     const visible = k.type === 'text';
@@ -524,6 +541,8 @@ async function init() {
   });
 
   window.flow.onToast(showToast);
+  el('appVersion').textContent = `WisperTalk v${await window.flow.getVersion()}`;
+  initUpdateCheck();
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
@@ -549,6 +568,47 @@ async function save() {
     showToast({ kind: 'success', message: 'Settings saved.' });
   }
   clearDirty();
+}
+
+/* Footer: update check against the public releases repo. */
+function initUpdateCheck() {
+  const btn = el('checkUpdatesBtn');
+  const status = el('updateStatus');
+  const dlBtn = el('downloadUpdateBtn');
+  let updateUrl = null;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    status.textContent = '';
+    dlBtn.style.display = 'none';
+    const res = await window.flow.checkUpdates().catch(() => null);
+    btn.disabled = false;
+    btn.textContent = 'Check for updates';
+    if (res?.status === 'up-to-date') {
+      status.textContent = "You're up to date.";
+    } else if (res?.status === 'available') {
+      status.textContent = `v${res.version} available —`;
+      updateUrl = res.url;
+      dlBtn.style.display = '';
+    } else {
+      status.textContent = "Couldn't check — try again later.";
+    }
+  });
+
+  dlBtn.addEventListener('click', async () => {
+    if (!updateUrl) return;
+    dlBtn.disabled = true;
+    dlBtn.textContent = 'Downloading…';
+    // On success main streams the installer to temp, launches it and quits —
+    // nothing left to do here. Only failures come back.
+    const res = await window.flow.downloadUpdate(updateUrl).catch(() => null);
+    if (!res?.ok) {
+      dlBtn.disabled = false;
+      dlBtn.textContent = 'Download';
+      status.textContent = res?.error ? `Download failed: ${res.error}` : 'Download failed — try again later.';
+    }
+  });
 }
 
 async function loadLicense() {

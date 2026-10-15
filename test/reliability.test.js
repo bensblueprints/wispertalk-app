@@ -122,6 +122,32 @@ test('failed paste and spawn failure retain the transcript even with restoration
 test('successful paste leaves a manual fallback by default', async () => {
   const h = pasteHarness(0); assert.equal((await h.paste('transcript')).ok, true); assert.equal(h.read(), 'transcript');
 });
+test('successful paste shows the transcript card with the dictated text', async () => {
+  const recognition = deferred();
+  const h = mainHarness(() => recognition.promise);
+  const shown = [];
+  const origSend = h.sender.send;
+  h.sender.send = (channel, payload) => { if (channel === 'overlay:transcript') shown.push(payload); origSend(channel, payload); };
+  const id = h.record();
+  const done = h.audio(id);
+  recognition.resolve('hello world');
+  await done;
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0]?.text, 'hello world');
+});
+
+test('failed paste does not show the transcript card', async () => {
+  const recognition = deferred();
+  const h = mainHarness(() => recognition.promise, { pasteMock: { pasteText: async () => ({ ok: false }) } });
+  const shown = [];
+  const origSend = h.sender.send;
+  h.sender.send = (channel, payload) => { if (channel === 'overlay:transcript') shown.push(payload); origSend(channel, payload); };
+  const id = h.record();
+  const done = h.audio(id);
+  recognition.resolve('hello world');
+  await done;
+  assert.deepEqual(shown, []); // failures keep the existing clipboard-fallback toast
+});
 test('hung paste helper is terminated and reports failure', async () => {
   const h = pasteHarness(null); assert.equal((await h.paste('transcript')).ok, false); assert.equal(h.killed(), true);
 });
@@ -239,9 +265,9 @@ test('rearm restarts the hook and releases an active hold exactly once', () => {
   assert.equal(starts, 2); assert.equal(stops, 1); assert.equal(releases, 1); manager.shutdown();
 });
 
-function mainHarness(transcribeLocal) {
+function mainHarness(transcribeLocal, { keyStateMock, pasteMock } = {}) {
   const handlers = new Map(), events = new Map(), sent = [], pasted = [], history = [];
-  const config = { sttEngine: 'local', showOverlay: false, useAppContext: false, autoPaste: true };
+  const config = { sttEngine: 'local', showOverlay: false, useAppContext: false, autoPaste: true, holdHotkey: 'AltRight' };
   const sender = { send: (channel, payload) => sent.push({ channel, payload }) };
   const context = load('src/main/main.js', { require: name => {
     if (name === 'electron') return { app: { requestSingleInstanceLock: () => true, on() {}, whenReady: () => ({ then() {} }) },
@@ -249,11 +275,12 @@ function mainHarness(transcribeLocal) {
     if (name === 'node:path') return path;
     if (name === './store') return { getAll: () => ({ ...config }), get: n => config[n], pushHistory: row => history.push(row) };
     if (name === './local-asr') return { SAMPLE_RATE: 16000, isAvailable: () => true, transcribeLocal };
-    if (name === './paste') return { pasteText: async text => { pasted.push(text); return { ok: true }; } };
+    if (name === './paste') return pasteMock || { pasteText: async text => { pasted.push(text); return { ok: true }; } };
+    if (name === './key-state') return keyStateMock || { query: async () => { throw new Error('key-state not mocked'); } };
     return {};
   } });
   context.sender = sender;
-  vm.runInContext('overlayWin = { isDestroyed: () => false, webContents: sender, hide() {} }; overlayReady = true; registerIpc();', context);
+  vm.runInContext('overlayWin = { isDestroyed: () => false, webContents: sender, hide() {}, setIgnoreMouseEvents() {}, showInactive() {} }; overlayReady = true; registerIpc();', context);
   const run = code => vm.runInContext(code, context);
   const record = () => { run('startRecording(); stopRecording();'); return sent.filter(s => s.channel === 'recorder:start').at(-1).payload.sessionId; };
   const audio = id => events.get('recorder:audio')({ sender }, { sessionId: id, pcm: new Float32Array(5000) });
@@ -290,5 +317,61 @@ test('hold release (incl. cap-triggered) takes the normal stop path exactly once
   assert.equal(h.run('busy'), true);
   h.run('handleHoldRelease()'); // stale repeat release after the cap is a no-op
   assert.equal(stops, 1);
+  h.run('resetPipeline();');
+});
+
+// The session-level physical-key watch (2.1.1 stuck-recording fix).
+function watchHarness(query) {
+  const h = mainHarness(async () => 'text', { keyStateMock: { query } });
+  let stops = 0;
+  const origSend = h.sender.send;
+  h.sender.send = (channel, payload) => { if (channel === 'recorder:stop') stops++; origSend(channel, payload); };
+  return { ...h, stops: () => stops };
+}
+
+test('tap race: key-up during an in-flight start still ends the session exactly once', () => {
+  const h = watchHarness(async () => true);
+  h.run('handleHoldPress()');
+  assert.equal(h.run('state'), 'starting'); // mic path still async-starting
+  h.run('handleHoldRelease()'); // key-up lands mid-start — must NOT be dropped
+  assert.equal(h.stops(), 1);
+  assert.equal(h.run('state'), 'idle');
+  h.run('handleHoldRelease()'); // any repeat release is a no-op
+  assert.equal(h.stops(), 1);
+  h.run('resetPipeline();');
+});
+
+test('session watch ends recording when the key is physically up and no key-up arrives', WIN_ONLY, async () => {
+  const h = watchHarness(async () => false); // GetAsyncKeyState: key is UP
+  h.run('handleHoldPress()');
+  h.run("setState('recording')");
+  // The lost-key-up scenario: no keyup event ever fires, and the hotkey's
+  // holding flag is irrelevant — the watch hangs off the SESSION.
+  await new Promise(r => setTimeout(r, 1300)); // 500ms delay + 2 polls @250ms
+  assert.equal(h.stops(), 1); // ended via the normal stop → transcribe → paste path
+  assert.equal(h.run('state'), 'idle');
+  assert.equal(h.run('busy'), true);
+  h.run('resetPipeline();');
+});
+
+test('session watch never interrupts while the key is physically down', WIN_ONLY, async () => {
+  const h = watchHarness(async () => true); // key physically held the whole time
+  h.run('handleHoldPress()');
+  h.run("setState('recording')");
+  await new Promise(r => setTimeout(r, 1500)); // several polls — no time cap exists
+  assert.equal(h.stops(), 0);
+  assert.equal(h.run('state'), 'recording');
+  h.run('handleHoldRelease()'); // the real key-up ends it normally
+  assert.equal(h.stops(), 1);
+  h.run('resetPipeline();');
+});
+
+test('key-state helper failure never cuts a session', WIN_ONLY, async () => {
+  const h = watchHarness(async () => { throw new Error('helper dead'); });
+  h.run('handleHoldPress()');
+  h.run("setState('recording')");
+  await new Promise(r => setTimeout(r, 1500)); // >3 consecutive failures → watch stops, session open
+  assert.equal(h.stops(), 0);
+  assert.equal(h.run('state'), 'recording');
   h.run('resetPipeline();');
 });

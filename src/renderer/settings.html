@@ -191,7 +191,10 @@
         </div>
         <div class="row">
           <label>License key</label>
-          <div id="licKey" style="font-family: 'Cascadia Code', Consolas, monospace; font-size: 14px; color: var(--accent-hover); padding-top: 2px;">—</div>
+          <div class="input-group">
+            <div id="licKey" style="flex: 1; font-family: 'Cascadia Code', Consolas, monospace; font-size: 14px; color: var(--accent-hover); padding-top: 2px; -webkit-user-select: text; user-select: text;">—</div>
+            <button class="btn-ghost" id="copyLicKeyBtn">Copy</button>
+          </div>
         </div>
       </div>
       <div class="row">
@@ -230,6 +233,12 @@
 
   <footer>
     <div id="toast" class="toast hidden"></div>
+    <div class="footer-version">
+      <span id="appVersion" class="version-text">WisperTalk</span>
+      <button class="btn-ghost" id="checkUpdatesBtn">Check for updates</button>
+      <span id="updateStatus" class="update-status"></span>
+      <button class="btn-primary" id="downloadUpdateBtn" style="display: none;">Download</button>
+    </div>
     <div class="footer-buttons">
       <button class="btn-ghost" id="cancelBtn">Close</button>
       <button class="btn-primary" id="saveBtn">Save changes</button>
