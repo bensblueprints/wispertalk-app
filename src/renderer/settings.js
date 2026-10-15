@@ -459,9 +459,46 @@ async function init() {
   });
 
   el('deactivateBtn').addEventListener('click', async () => {
-    if (!confirm('Sign out on this computer? WisperTalk will quit — sign back in with your Whop account on next launch.')) return;
+    if (!confirm('Deactivate this device? WisperTalk will quit and ask for a license key on next launch.')) return;
+    // Main deletes the activation file and quits the app.
     try { await window.flow.deactivateLicense(); } catch {}
-    window.flow.quitApp();
+  });
+
+  // Reseller tools — main keeps the unlock tier in memory; the renderer only
+  // reflects what main reports and never decides anything itself.
+  el('unlockResellerBtn').addEventListener('click', async () => {
+    const res = await window.flow.unlockReseller(el('masterKeyInput').value);
+    const ok = !!res?.unlocked;
+    el('resellerPanel').style.display = ok ? '' : 'none';
+    // Minting reseller keys is master-only; main enforces it again on generate.
+    el('generateResellerKeyBtn').style.display = res?.canMintResellers ? '' : 'none';
+    el('resellerHint').textContent = ok
+      ? (res.canMintResellers
+        ? 'Master key accepted. You can generate customer and reseller keys until the app restarts.'
+        : 'Reseller key accepted. You can generate customer keys until the app restarts.')
+      : 'Wrong key — reseller tools stay locked.';
+    if (ok) el('masterKeyInput').value = '';
+  });
+  el('generateKeyBtn').addEventListener('click', () => mintKey(window.flow.generateLicenseKey));
+  el('generateResellerKeyBtn').addEventListener('click', () => mintKey(window.flow.generateResellerKey));
+
+  async function mintKey(fn) {
+    const res = await fn(el('customerName').value);
+    if (!res?.ok) {
+      showToast({ kind: 'error', message: res?.error || 'Reseller tools are locked.' });
+      return;
+    }
+    el('generatedKey').value = res.key;
+    el('generatedKeyRow').style.display = '';
+  }
+  el('copyKeyBtn').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(el('generatedKey').value);
+      showToast({ kind: 'success', message: 'License key copied.' });
+    } catch {
+      el('generatedKey').select();
+      showToast({ kind: 'warn', message: 'Clipboard unavailable — key selected, press Ctrl+C.' });
+    }
   });
 
   el('toggleKey').addEventListener('click', () => {
@@ -516,9 +553,8 @@ async function save() {
 
 async function loadLicense() {
   const lic = await window.flow.getLicense();
-  el('licUser').textContent = lic.activated ? (lic.userId || 'Signed in') : 'Not signed in';
-  el('licActivated').textContent = lic.activatedAt ? new Date(lic.activatedAt).toLocaleDateString() : '—';
-  el('licVerified').textContent = lic.lastCheck ? new Date(lic.lastCheck).toLocaleString() : '—';
+  el('licStatus').textContent = lic.activated ? (lic.holder ? `Activated — Welcome, ${lic.holder}` : 'Activated') : 'Not activated';
+  el('licKey').textContent = lic.activated && lic.key ? lic.key : '—';
 }
 
 async function loadHistory() {

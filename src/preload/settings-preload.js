@@ -7,8 +7,11 @@ contextBridge.exposeInMainWorld('flow', {
   resetSettings: () => ipcRenderer.invoke('settings:reset'),
   closeWindow: () => ipcRenderer.invoke('settings:close'),
   getHistory: () => ipcRenderer.invoke('history:list'),
-  getLicense: () => ipcRenderer.invoke('license:status'),
-  deactivateLicense: () => ipcRenderer.invoke('license:deactivateThisDevice'),
+  getLicense: () => ipcRenderer.invoke('license-key:status'),
+  deactivateLicense: () => ipcRenderer.invoke('license-key:deactivate'),
+  unlockReseller: (masterKey) => ipcRenderer.invoke('license-key:unlockReseller', masterKey),
+  generateLicenseKey: (name) => ipcRenderer.invoke('license-key:generate', name),
+  generateResellerKey: (name) => ipcRenderer.invoke('license-key:generateReseller', name),
   quitApp: () => ipcRenderer.invoke('app:quit'),
   // Press-to-map hotkey capture
   captureHotkey: (mode) => ipcRenderer.invoke('hotkey:capture', mode),

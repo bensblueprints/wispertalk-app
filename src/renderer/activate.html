@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WisperTalk — Activation</title>
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --bg-elev: #18181d;
+      --border: #2a2a33;
+      --text: #f5f5f7;
+      --text-mute: #a0a0ac;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", -apple-system, system-ui, sans-serif;
+      font-size: 13.5px;
+      line-height: 1.5;
+      height: 100vh;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 24px 28px;
+      text-align: center;
+    }
+    .logo {
+      width: 44px; height: 44px;
+      border-radius: 11px;
+      background:
+        radial-gradient(circle at 30% 30%, #a78bfa 0%, transparent 50%),
+        linear-gradient(135deg, #6366f1, #4f46e5);
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35), inset 0 1px 0 rgba(255,255,255,0.15);
+      position: relative;
+    }
+    .logo::after {
+      content: '';
+      position: absolute;
+      inset: 11px 15px 13px 15px;
+      background: linear-gradient(180deg, #fff, rgba(255,255,255,0.7));
+      border-radius: 5px;
+      box-shadow: 0 2px 0 rgba(255,255,255,0.5);
+    }
+    .title { font-weight: 600; font-size: 16px; }
+    .subtitle { font-size: 12px; color: var(--text-mute); }
+    input {
+      width: 100%;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 10px 12px;
+      font-family: 'Cascadia Code', Consolas, monospace;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-align: center;
+      outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    button {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      padding: 10px 12px;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .error {
+      min-height: 18px;
+      font-size: 12px;
+      color: var(--danger);
+    }
+    .hint { font-size: 11.5px; color: var(--text-mute); margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="logo"></div>
+  <div>
+    <div class="title">WisperTalk 2.0</div>
+    <div class="subtitle">Enter your license key to activate</div>
+  </div>
+  <input type="text" id="key" placeholder="WT2-XXXXXX-XXXXXXXX-XXXXXXX" spellcheck="false" autocomplete="off" autofocus />
+  <div class="error" id="error"></div>
+  <button id="activate">Activate</button>
+  <p class="hint">Offline activation — no internet needed. Closing this window quits WisperTalk.</p>
+
+  <script>
+    const keyInput = document.getElementById('key');
+    const errorEl = document.getElementById('error');
+    const btn = document.getElementById('activate');
+
+    async function submit() {
+      errorEl.textContent = '';
+      btn.disabled = true;
+      try {
+        const res = await window.flow.activate(keyInput.value);
+        if (!res?.ok) errorEl.textContent = res?.error || 'Activation failed.';
+        // On success the main process saves the key and closes this window.
+      } catch (err) {
+        errorEl.textContent = err.message || 'Activation failed.';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    btn.addEventListener('click', submit);
+    keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  </script>
+</body>
+</html>

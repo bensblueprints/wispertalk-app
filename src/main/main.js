@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, dialog, powerMonitor, Notification } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const store = require('./store');
 const { HotkeyManager, HOLD_KEY_CHOICES, holdKeyChoices, labelForName } = require('./hotkey');
 const { transcribe } = require('./transcribe');
@@ -7,7 +8,7 @@ const localAsr = require('./local-asr');
 const { cleanup } = require('./postprocess');
 const { pasteText } = require('./paste');
 const { getForegroundContext } = require('./context');
-const { gateLicense, registerLicenseIpc } = require('./license-gate');
+const { generateKey, generateResellerKey, parseKey, validateKey } = require('./license-key');
 const { isTrusted, ensureAccessibility } = require('./mac-accessibility');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-128.png');
@@ -20,6 +21,9 @@ const AUDIO_HANDBACK_TIMEOUT_MS = 15000;
 let tray = null;
 let overlayWin = null;
 let settingsWin = null;
+let activateWin = null;
+let resellerUnlockTier = null; // null | 'master' | 'reseller' — in-memory only, never persisted
+let activationSucceeded = false;
 let hotkey = null;
 let state = 'idle';
 let busy = false;
@@ -50,9 +54,9 @@ app.on('before-quit', () => {
 async function init() {
   app.setAppUserModelId('com.wispertalk.app');
 
-  // Whop purchase gate — "Sign in with Whop" verifies the purchase; no keys.
-  if (!(await gateLicense())) return; // quit already requested
-  registerLicenseIpc();
+  // WisperTalk 2.0 — offline license-key gate (replaces the old Whop gate).
+  registerLicenseKeyIpc();
+  if (!(await gateLicenseKey())) return; // quit already requested
 
   // On macOS the hotkey cannot install without Accessibility ("failed to enable
   // access for assistive devices"). Ask for it properly - registering with the
@@ -88,6 +92,116 @@ async function init() {
   if (store.get('sttEngine') !== 'local' && !store.get('groqApiKey')) {
     openSettings();
   }
+}
+
+/**
+ * WisperTalk 2.0 license-key gate. Boot continues only with a valid stored
+ * key; otherwise an always-on-top activation window is shown. Closing that
+ * window without activating quits the app.
+ */
+function licenseStatePath() {
+  return path.join(app.getPath('userData'), 'license-key.json');
+}
+
+function loadStoredKey() {
+  try {
+    const s = JSON.parse(fs.readFileSync(licenseStatePath(), 'utf8'));
+    return typeof s.key === 'string' ? s.key : null;
+  } catch { return null; }
+}
+
+function maskKey(key) {
+  const n = String(key).trim().toUpperCase();
+  return `${n.split('-')[0]}-…-${n.slice(-3)}`;
+}
+
+function gateLicenseKey() {
+  const stored = loadStoredKey();
+  if (stored && validateKey(stored)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    activateWin = new BrowserWindow({
+      width: 440,
+      height: 340,
+      title: 'WisperTalk — Activation',
+      icon: ICON_PATH,
+      backgroundColor: '#0f0f12',
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      alwaysOnTop: true,
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, '..', 'preload', 'activate-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false
+      }
+    });
+    activateWin.setMenuBarVisibility(false);
+    activateWin.loadFile(path.join(__dirname, '..', 'renderer', 'activate.html'));
+    activateWin.on('closed', () => {
+      activateWin = null;
+      if (activationSucceeded) {
+        activationSucceeded = false;
+        resolve(true);
+      } else {
+        app.quit();
+        resolve(false);
+      }
+    });
+  });
+}
+
+/* License-key IPC: activation window + Settings → License pane. */
+function registerLicenseKeyIpc() {
+  ipcMain.handle('license-key:activate', (_e, key) => {
+    const parsed = parseKey(key);
+    if (!parsed.valid) return { ok: false, error: 'That license key is not valid. Check it and try again.' };
+    fs.writeFileSync(licenseStatePath(), JSON.stringify({ key: String(key).trim().toUpperCase(), activatedAt: new Date().toISOString() }, null, 2));
+    if (activateWin && !activateWin.isDestroyed()) {
+      activationSucceeded = true;
+      activateWin.close();
+    }
+    // Greet the key holder by name. Only the master key also gets the
+    // reseller-tools line — customer keys must never hint at them.
+    if (parsed.holder) {
+      dialog.showMessageBox({
+        type: 'info', title: 'WisperTalk 2.0',
+        message: `Welcome, ${parsed.holder}!`,
+        detail: parsed.tier === 'master'
+          ? 'Reseller access unlocked — generate license keys anytime from Settings → License → Reseller tools.'
+          : 'WisperTalk is activated on this device. Enjoy!'
+      });
+    }
+    return { ok: true };
+  });
+  ipcMain.handle('license-key:status', () => {
+    const key = loadStoredKey();
+    if (!key || !validateKey(key)) return { activated: false };
+    const parsed = parseKey(key);
+    return { activated: true, key: maskKey(key), isMaster: parsed.tier === 'master', tier: parsed.tier, holder: parsed.holder };
+  });
+  ipcMain.handle('license-key:deactivate', () => {
+    try { fs.unlinkSync(licenseStatePath()); } catch {}
+    app.quit();
+    return { ok: true };
+  });
+  // Reseller tools: the unlock tier is in-memory only (never persisted) and the
+  // generate handlers re-check it here in main — the renderer is never trusted.
+  ipcMain.handle('license-key:unlockReseller', (_e, key) => {
+    const parsed = parseKey(key);
+    resellerUnlockTier = parsed.valid && (parsed.tier === 'master' || parsed.tier === 'reseller') ? parsed.tier : null;
+    return { unlocked: resellerUnlockTier !== null, tier: resellerUnlockTier, canMintResellers: resellerUnlockTier === 'master' };
+  });
+  ipcMain.handle('license-key:generate', (_e, name) => {
+    if (!resellerUnlockTier) return { ok: false, error: 'Reseller tools are locked.' };
+    return { ok: true, key: generateKey(typeof name === 'string' ? name : '') };
+  });
+  // Minting reseller keys is master-only — resellers can mint customers, not peers.
+  ipcMain.handle('license-key:generateReseller', (_e, name) => {
+    if (resellerUnlockTier !== 'master') return { ok: false, error: 'Only the master key can generate reseller keys.' };
+    return { ok: true, key: generateResellerKey(typeof name === 'string' ? name : '') };
+  });
 }
 
 /**
@@ -270,7 +384,7 @@ function rebuildTrayMenu() {
     { label: cfg.toggleEnabled ? `Toggle: ${cfg.toggleHotkey}${toggleBad ? ' (NOT ACTIVE)' : ''}` : 'Toggle: off', enabled: false },
     { label: `Engine: ${cfg.sttEngine === 'local' ? 'Local (offline)' : 'Groq (cloud)'}`, enabled: false },
     { type: 'separator' },
-    { label: 'Licensed via Whop', enabled: false },
+    { label: 'Licensed (offline key)', enabled: false },
     { type: 'separator' },
     { label: 'Settings…', click: () => openSettings() },
     { label: 'Re-arm hotkeys', click: () => { const s = hotkey?.rearm('tray menu'); if (s && !hotkeyProblems(s).length) sendToast({ kind: 'success', message: 'Hotkeys re-armed.' }); } },

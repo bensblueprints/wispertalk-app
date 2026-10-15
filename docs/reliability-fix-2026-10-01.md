@@ -34,3 +34,8 @@ Branch: `fix/dictation-reliability`, based on upstream `1e8c574`.
 Existing Boardly tasks found by successful `find_cards`: card 181, “Identify Wisper Talk error and affected Mac build”; card 312, “105 · WisperTalk — Windows & Mac readiness”, both in workspace 2. The current Windows report belongs with card 181, preserving the separate Mac readiness scope.
 
 Boardly get_board, get_card and update_card tool calls returned `MCP tool call requires approval, but approval policy is never`. This is a tool-integration approval error, not proof that Boardly's application rejected the operation. No successful Boardly update is claimed. The attempted update did not succeed; this document preserves the evidence for syncing to the existing task when that integration permits writes.
+
+
+## Boardly sync verified
+
+On 2026-10-01, the Windows reliability record was appended to existing Boardly card 181 in Board 2 via authenticated MCP `update_card`, then fetched with `get_card`. The saved description matched the submitted content exactly (5,649 characters). No model inference was involved in the data write or read-back. The earlier approval error is preserved above as historical evidence. The original Mac readiness scope and the remaining physical-device checks remain open.

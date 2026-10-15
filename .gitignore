@@ -4,6 +4,10 @@ build/icon.ico
 *.log
 .DS_Store
 
+# License signing secrets — loaded by src/main/license-key.js. Never commit:
+# the public repo must carry no secrets (the packaged app still embeds them).
+src/main/license-secrets.json
+
 # Offline Whisper weights — fetched at build time by scripts/fetch-models.js
 models/
 build-assets/

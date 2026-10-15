@@ -184,24 +184,39 @@
     </section>
 
     <section data-pane="license">
-      <div class="row">
-        <label>Whop account</label>
-        <div id="licUser" style="font-family: 'Cascadia Code', Consolas, monospace; font-size: 16px; color: var(--accent-hover); padding: 12px 0;">—</div>
-      </div>
       <div class="grid-2">
         <div class="row">
-          <label>Activated</label>
-          <div id="licActivated" style="color: var(--text); font-size: 13.5px;">—</div>
+          <label>Status</label>
+          <div id="licStatus" style="color: var(--text); font-size: 13.5px;">—</div>
         </div>
         <div class="row">
-          <label>Last verified</label>
-          <div id="licVerified" style="color: var(--text-mute); font-size: 13px;">—</div>
+          <label>License key</label>
+          <div id="licKey" style="font-family: 'Cascadia Code', Consolas, monospace; font-size: 14px; color: var(--accent-hover); padding-top: 2px;">—</div>
         </div>
+      </div>
+      <div class="row">
+        <p class="hint">WisperTalk 2.0 activates with an offline license key — no account, no internet check. Deactivating frees this device; re-enter your key on next launch.</p>
+        <button class="btn-ghost" id="deactivateBtn" style="border-color: rgba(239, 68, 68, 0.5); color: #ef4444;">Deactivate this device</button>
       </div>
       <hr />
       <div class="row">
-        <p class="hint">WisperTalk is licensed through your Whop purchase — no license key. Signing out frees this device slot; sign back in with the same Whop account anytime.</p>
-        <button class="btn-ghost" id="deactivateBtn" style="border-color: rgba(239, 68, 68, 0.5); color: #ef4444;">Sign out on this device</button>
+        <label>Reseller tools</label>
+        <div class="input-group">
+          <input type="password" id="masterKeyInput" placeholder="Master or reseller key" spellcheck="false" />
+          <button class="btn-ghost" id="unlockResellerBtn">Unlock</button>
+        </div>
+        <p class="hint" id="resellerHint">Resellers only — unlock with a master or reseller key to generate customer keys. The master key can also mint reseller keys. Stays unlocked until the app restarts.</p>
+      </div>
+      <div class="row" id="resellerPanel" style="display: none;">
+        <div class="input-group">
+          <input type="text" id="customerName" placeholder="Customer name (optional) — greeted on activation" spellcheck="false" />
+          <button class="btn-primary" id="generateKeyBtn">Generate License Key</button>
+          <button class="btn-primary" id="generateResellerKeyBtn" style="display: none;">Generate Reseller Key</button>
+        </div>
+        <div class="input-group" id="generatedKeyRow" style="display: none; margin-top: 8px;">
+          <input type="text" id="generatedKey" readonly spellcheck="false" />
+          <button class="btn-ghost" id="copyKeyBtn">Copy</button>
+        </div>
       </div>
     </section>
 

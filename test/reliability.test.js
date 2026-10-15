@@ -126,6 +126,104 @@ test('hung paste helper is terminated and reports failure', async () => {
   const h = pasteHarness(null); assert.equal((await h.paste('transcript')).ok, false); assert.equal(h.killed(), true);
 });
 
+function hotkeyHarness() {
+  const hook = new EventEmitter(); hook.start = () => {}; hook.stop = () => {};
+  const presses = [], releases = [];
+  const context = load('src/main/hotkey.js', { require: name => {
+    if (name === 'electron') return { globalShortcut: { register: () => true, unregisterAll() {} }, powerMonitor: { getSystemIdleTime: () => 0 } };
+    if (name === 'uiohook-napi') return { uIOhook: hook, UiohookKey: { AltRight: 56 } };
+    if (name === './mac-accessibility') return { isTrusted: () => true };
+    return { isAvailable: () => false, KEY_NAME: 'GlobeFn' };
+  } });
+  const manager = new context.module.exports.HotkeyManager({
+    onHoldPress: () => presses.push(1),
+    onHoldRelease: () => releases.push(1)
+  });
+  manager.apply({ holdEnabled: true, holdHotkey: 'AltRight' });
+  return { manager, hook, presses, releases, context };
+}
+
+test('a tap does not stick: press and release fire once each and the next tap works', async () => {
+  const { manager, hook, presses, releases } = hotkeyHarness();
+  hook.emit('keydown', { keycode: 56 });
+  hook.emit('keyup', { keycode: 56 });
+  assert.equal(presses.length, 1);
+  assert.equal(releases.length, 1);
+  assert.equal(manager.holding, false);
+  await new Promise(r => setTimeout(r, 80)); // past the 50ms debounce
+  hook.emit('keydown', { keycode: 56 });
+  hook.emit('keyup', { keycode: 56 });
+  assert.equal(presses.length, 2);
+  assert.equal(releases.length, 2);
+  assert.equal(manager.holding, false);
+  manager.shutdown();
+});
+
+const WIN_ONLY = { skip: process.platform !== 'win32' }; // key-state polling is Windows-only
+
+test('hold with key physically down runs past the grace period without being released', WIN_ONLY, async () => {
+  const { manager, hook, presses, releases } = hotkeyHarness();
+  manager.holdGraceMs = 30;
+  manager.holdPollMs = 20;
+  let queries = 0;
+  manager.keyStateQuery = async () => { queries++; return true; }; // GetAsyncKeyState: still held
+  hook.emit('keydown', { keycode: 56 });
+  await new Promise(r => setTimeout(r, 150)); // grace + several polls — far past any old blind cap
+  assert.ok(queries >= 2, 'physical state was polled');
+  assert.equal(releases.length, 0); // genuine long dictation is NEVER cut
+  assert.equal(manager.holding, true);
+  hook.emit('keyup', { keycode: 56 }); // real key-up still ends it normally
+  assert.equal(releases.length, 1);
+  manager.shutdown();
+});
+
+test('lost key-up is detected by physical state and released exactly once', WIN_ONLY, async () => {
+  const { manager, hook, presses, releases } = hotkeyHarness();
+  manager.holdGraceMs = 30;
+  manager.holdPollMs = 20;
+  manager.keyStateQuery = async () => false; // key physically UP
+  hook.emit('keydown', { keycode: 56 }); // the key-up event never arrives
+  assert.equal(presses.length, 1);
+  assert.equal(manager.holding, true);
+  await new Promise(r => setTimeout(r, 120));
+  // Detected: hold ends through the SAME callback a real key-up uses, so the
+  // session goes down the normal stop → transcribe → paste path.
+  assert.equal(manager.holding, false);
+  assert.equal(releases.length, 1);
+  hook.emit('keyup', { keycode: 56 }); // belated real key-up must not double-release
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(releases.length, 1);
+  manager.shutdown();
+});
+
+test('key-state query failures never release the hold', WIN_ONLY, async () => {
+  const { manager, hook, releases } = hotkeyHarness();
+  manager.holdGraceMs = 30;
+  manager.holdPollMs = 20;
+  let queries = 0;
+  manager.keyStateQuery = async () => { queries++; throw new Error('powershell missing'); };
+  hook.emit('keydown', { keycode: 56 });
+  await new Promise(r => setTimeout(r, 200)); // well past 3 consecutive failures → poll stops
+  assert.ok(queries >= 3);
+  assert.equal(releases.length, 0); // fail toward NOT cutting dictation
+  assert.equal(manager.holding, true);
+  hook.emit('keyup', { keycode: 56 }); // a real key-up still works afterwards
+  assert.equal(releases.length, 1);
+  manager.shutdown();
+});
+
+test('hook dying mid-hold is re-armed by the health check and the hold released', () => {
+  const { manager, hook, releases, context } = hotkeyHarness();
+  hook.emit('keydown', { keycode: 56 });
+  assert.equal(manager.holding, true);
+  vm.runInContext('uioStarted = false', context); // OS silently dropped the hook
+  manager._healthCheck();
+  assert.equal(releases.length, 1);
+  assert.equal(manager.holding, false);
+  assert.equal(vm.runInContext('uioStarted', context), true); // re-armed
+  manager.shutdown();
+});
+
 test('rearm restarts the hook and releases an active hold exactly once', () => {
   let starts = 0, stops = 0, releases = 0;
   const hook = new EventEmitter(); hook.start = () => starts++; hook.stop = () => stops++;
@@ -177,4 +275,20 @@ test('duplicate audio is processed once and normal recognition reaches paste', a
   const id = h.record(); const first = h.audio(id); await h.audio(id);
   recognition.resolve('hello world'); await first;
   assert.equal(calls, 1); assert.deepEqual(h.pasted, ['hello world']); assert.equal(h.run('busy'), false);
+});
+
+test('hold release (incl. cap-triggered) takes the normal stop path exactly once', () => {
+  const h = mainHarness(async () => 'text');
+  let stops = 0;
+  const origSend = h.sender.send;
+  h.sender.send = (channel, payload) => { if (channel === 'recorder:stop') stops++; origSend(channel, payload); };
+  h.run('handleHoldPress()'); // hold starts → recording starts
+  assert.equal(h.run('state'), 'starting');
+  h.run("setState('recording')"); // mic became ready
+  h.run('handleHoldRelease()'); // key-up OR hold-cap release — same entry point
+  assert.equal(stops, 1); // normal stop → transcribe → paste path
+  assert.equal(h.run('busy'), true);
+  h.run('handleHoldRelease()'); // stale repeat release after the cap is a no-op
+  assert.equal(stops, 1);
+  h.run('resetPipeline();');
 });

@@ -186,7 +186,52 @@ const HEALTH_INTERVAL_MS = 10_000;
 // If the user is demonstrably at the keyboard/mouse but uiohook has been silent
 // this long, the OS almost certainly dropped our low-level hook.
 const SILENCE_BEFORE_REARM_MS = 30_000;
+// Stuck-hold detection by PHYSICAL key state — deliberately NOT a blind time
+// cap: real dictation runs as long as the key is held and must never be cut
+// off. Once a hold has been open for HOLD_GRACE_MS we poll the actual key
+// every HOLD_POLL_MS (Windows: GetAsyncKeyState). Physically UP means the
+// key-up event was lost, so the hold is released through the exact same
+// callback a real key-up uses; physically DOWN means keep recording,
+// indefinitely. Windows-only — macOS keeps relying on rearm() recovery.
+const HOLD_GRACE_MS = 60_000;
+const HOLD_POLL_MS = 5_000;
+// Query failures fail toward NOT cutting dictation: after this many
+// consecutive failures the poll stops and the hold is left open.
+const HOLD_QUERY_MAX_FAILURES = 3;
+// Hold-key name -> Windows virtual-key code. Only these can be polled; any
+// other hold key is simply left alone (again: never cut real dictation).
+const WINDOWS_VK_BY_HOLD_NAME = { AltRight: 0xA5 }; // VK_RMENU
 const CAPTURE_TIMEOUT_MS = 15_000;
+
+/**
+ * Physical key state on Windows: GetAsyncKeyState via a one-shot PowerShell
+ * helper — the same spawn idiom paste.js already uses, no new dependencies.
+ * Resolves true while the key's high bit is set (physically held down).
+ */
+function queryWindowsKeyState(vk) {
+  return new Promise((resolve, reject) => {
+    const script = `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class WisperKeys { [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key); }'; if (([WisperKeys]::GetAsyncKeyState(${vk}) -band 0x8000) -ne 0) { 'DOWN' } else { 'UP' }`;
+    const { spawn } = require('node:child_process');
+    let child;
+    try {
+      child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script], { windowsHide: true });
+    } catch (err) { reject(err); return; }
+    let out = '';
+    let settled = false;
+    const fail = err => { if (!settled) { settled = true; clearTimeout(timer); reject(err); } };
+    const timer = setTimeout(() => { try { child.kill(); } catch {} fail(new Error('key-state query timed out')); }, 4000);
+    child.stdout?.on('data', d => { out += d; });
+    child.stderr?.resume();
+    child.on('error', fail);
+    child.on('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`key-state helper exited ${code}`));
+      resolve(/\bDOWN\b/.test(out));
+    });
+  });
+}
 
 class HotkeyManager {
   constructor(callbacks) {
@@ -201,6 +246,13 @@ class HotkeyManager {
     this.capture = null;
     this.captureTimer = null;
     this.healthTimer = null;
+    this.holdGraceTimer = null;
+    this.holdPollTimer = null;
+    this.holdQueryFailures = 0;
+    this.holdQueryInFlight = false;
+    this.holdGraceMs = HOLD_GRACE_MS; // instance-settable so tests can shrink it
+    this.holdPollMs = HOLD_POLL_MS;
+    this.keyStateQuery = null; // test hook; production uses queryWindowsKeyState
   }
 
   /** True when a global keyboard hook is even possible on this install. */
@@ -311,6 +363,7 @@ class HotkeyManager {
    */
   rearm(reason = 'manual') {
     console.log(`[hotkey] re-arming (${reason})`);
+    this._clearHoldWatch();
     if (this.holding) this.callbacks.onHoldRelease?.();
     this.holding = false;
     if (uIOhook && uioStarted) {
@@ -331,8 +384,8 @@ class HotkeyManager {
     }
     if (this.fnMonitor) this.fnMonitor.stop();
     this.fnMonitor = new FnMonitor({
-      onPress: () => { this.lastHookEventAt = Date.now(); this.holding = true; this.callbacks.onHoldPress?.(); },
-      onRelease: () => { this.lastHookEventAt = Date.now(); this.holding = false; this.callbacks.onHoldRelease?.(); },
+      onPress: () => { this.lastHookEventAt = Date.now(); this.holding = true; this._armHoldWatch(); this.callbacks.onHoldPress?.(); },
+      onRelease: () => { this.lastHookEventAt = Date.now(); this._clearHoldWatch(); this.holding = false; this.callbacks.onHoldRelease?.(); },
       onError: (msg) => this.callbacks.onStatus?.(
         { hold: { enabled: true, ok: false, error: msg, label: labelForName(FN_KEY_NAME) },
           toggle: { enabled: false, ok: true, error: null, label: '' } },
@@ -350,14 +403,17 @@ class HotkeyManager {
 
   _healthCheck() {
     const cfg = this.lastConfig;
-    if (!cfg || !cfg.holdEnabled || !uIOhook || this.capture || this.holding) return;
+    if (!cfg || !cfg.holdEnabled || !uIOhook || this.capture) return;
     // Globe/Fn doesn't use uiohook at all, so the "hook looks dead" heuristics
     // below would re-arm it forever. The helper re-enables its own tap.
     if (cfg.holdHotkey === FN_KEY_NAME) return;
     if (!uioStarted) {
+      // If the hook died mid-hold the key-up is lost forever — re-arming
+      // releases that stuck hold (see rearm()).
       this.rearm('hook not running');
       return;
     }
+    if (this.holding) return; // silence below can't judge a held key; the cap bounds it
     let idleSeconds = 999;
     try { idleSeconds = powerMonitor.getSystemIdleTime(); } catch {}
     const silentFor = Date.now() - this.lastHookEventAt;
@@ -445,6 +501,7 @@ class HotkeyManager {
     if (now - this.lastDownAt < 50) return;
     this.lastDownAt = now;
     this.holding = true;
+    this._armHoldWatch();
     this.callbacks.onHoldPress?.();
   }
 
@@ -454,12 +511,69 @@ class HotkeyManager {
     if (this.holdCode == null) return;
     if (e.keycode !== this.holdCode) return;
     if (!this.holding) return;
+    this._clearHoldWatch();
     this.holding = false;
     this.callbacks.onHoldRelease?.();
   }
 
+  /**
+   * Arm stuck-hold detection: after the grace period, verify the hold against
+   * the PHYSICAL key state. A lost key-up is the only way a hold gets stuck,
+   * and no timer alone can tell that apart from a real long dictation.
+   */
+  _armHoldWatch() {
+    this._clearHoldWatch();
+    this.holdQueryFailures = 0;
+    this.holdGraceTimer = setTimeout(() => {
+      this.holdGraceTimer = null;
+      if (this.holding) this._startHoldPolling();
+    }, this.holdGraceMs);
+    if (this.holdGraceTimer.unref) this.holdGraceTimer.unref();
+  }
+
+  _startHoldPolling() {
+    if (this.holdPollTimer || !this.holding) return;
+    if (process.platform !== 'win32') return; // macOS: rearm() stays the recovery path
+    const vk = WINDOWS_VK_BY_HOLD_NAME[nameForKeycode(this.holdCode)];
+    if (vk == null) return; // un-pollable hold key — leave the hold alone
+    this.holdPollTimer = setInterval(() => this._pollHoldKey(vk), this.holdPollMs);
+    if (this.holdPollTimer.unref) this.holdPollTimer.unref();
+    this._pollHoldKey(vk); // first check right away
+  }
+
+  async _pollHoldKey(vk) {
+    if (!this.holding) { this._clearHoldWatch(); return; }
+    if (this.holdQueryInFlight) return; // a hung query must not stack up
+    this.holdQueryInFlight = true;
+    try {
+      const down = await (this.keyStateQuery || queryWindowsKeyState)(vk);
+      if (!this.holding) return; // released while the query was in flight
+      this.holdQueryFailures = 0;
+      if (down) return; // physically held — keep recording, no time limit
+      console.warn('[hotkey] hold is open but the key is physically UP — key-up was lost; releasing via the normal path');
+      this._clearHoldWatch();
+      this.holding = false;
+      this.callbacks.onHoldRelease?.();
+    } catch (err) {
+      this.holdQueryFailures++;
+      console.warn(`[hotkey] key-state query failed (${this.holdQueryFailures}/${HOLD_QUERY_MAX_FAILURES}):`, err?.message || err);
+      if (this.holdQueryFailures >= HOLD_QUERY_MAX_FAILURES) {
+        console.warn('[hotkey] key-state query keeps failing — leaving the hold open rather than cutting dictation');
+        this._clearHoldWatch();
+      }
+    } finally {
+      this.holdQueryInFlight = false;
+    }
+  }
+
+  _clearHoldWatch() {
+    if (this.holdGraceTimer) { clearTimeout(this.holdGraceTimer); this.holdGraceTimer = null; }
+    if (this.holdPollTimer) { clearInterval(this.holdPollTimer); this.holdPollTimer = null; }
+  }
+
   /** Release a stuck hold (e.g. the key-up was swallowed by another app). */
   clearHolding() {
+    this._clearHoldWatch();
     this.holding = false;
   }
 
@@ -471,6 +585,7 @@ class HotkeyManager {
     if (this.fnMonitor) { this.fnMonitor.stop(); this.fnMonitor = null; }
     this.toggleAccel = null;
     this.holdCode = null;
+    this._clearHoldWatch();
     this.holding = false;
   }
 
@@ -524,5 +639,8 @@ module.exports = {
   nameForKeycode,
   keycodeForName,
   labelForName,
-  acceleratorFromEvent
+  acceleratorFromEvent,
+  HOLD_GRACE_MS,
+  HOLD_POLL_MS,
+  HOLD_QUERY_MAX_FAILURES
 };
