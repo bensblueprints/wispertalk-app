@@ -38,14 +38,18 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "models/**/*",
       "package.json",
       "!node_modules/onnxruntime-web${/*}"
     ],
     "asarUnpack": [
       "node_modules/uiohook-napi/**/*",
-      "node_modules/onnxruntime-node/**/*",
-      "models/**/*"
+      "node_modules/onnxruntime-node/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "models",
+        "to": "models"
+      }
     ],
     "win": {
       "target": [
@@ -115,6 +119,10 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extraResources": [
+        {
+          "from": "models",
+          "to": "models"
+        },
         {
           "from": "build-assets",
           "to": ".",
