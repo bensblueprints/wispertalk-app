@@ -43,20 +43,19 @@ jobs:
       - name: Build Mac DMG + ZIP (signed + notarized when Apple secrets are set)
         shell: bash
         run: |
-          if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ]; then
+          if [ -n "${{ secrets.MAC_CERTS_P12 }}" ] && [ -n "${{ secrets.APPLE_ID }}" ]; then
             echo "::notice::Apple secrets found — building signed + notarized"
+            export CSC_LINK='${{ secrets.MAC_CERTS_P12 }}'
+            export CSC_KEYCHAIN_PASSWORD='${{ secrets.MAC_CERTS_PASSWORD }}'
+            export CSC_KEY_PASSWORD='${{ secrets.MAC_CERTS_PASSWORD }}'
+            export APPLE_ID='${{ secrets.APPLE_ID }}'
+            export APPLE_APP_SPECIFIC_PASSWORD='${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}'
+            export APPLE_TEAM_ID='${{ secrets.APPLE_TEAM_ID }}'
             npm run dist:mac -- --publish never -c.mac.notarize=true
           else
             echo "::notice::No Apple secrets — building unsigned (Gatekeeper will warn)"
             CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac -- --publish never
           fi
-        env:
-          CSC_LINK: ${{ secrets.MAC_CERTS_P12 }}
-          CSC_KEYCHAIN_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: List dist
         if: always()
