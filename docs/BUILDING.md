@@ -61,41 +61,43 @@ Output in `dist/`:
 - `latest-mac.yml` — autoupdater feed
 - Block maps for differential updates
 
-Both DMGs are **unsigned**. To sign for Gatekeeper, set `mac.identity` in `package.json` to your Apple Developer Team ID and provide the cert via the `CSC_LINK` and `CSC_KEY_PASSWORD` env vars. We don't sign by default.
+Both DMGs are **unsigned unless the CI Apple secrets are set** (see below). To sign locally, provide the cert via the `CSC_LINK` and `CSC_KEY_PASSWORD` env vars and pass `-c.mac.notarize=true` with `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` set.
 
 ## CI: GitHub Actions
 
-`.github/workflows/build-mac.yml` runs on every push to `main` (and on `workflow_dispatch`). It:
+`.github/workflows/build-and-release.yml` runs on every push to `main` (and on `workflow_dispatch`). The `build-mac` job:
 
 1. Checks out the repo on a `macos-latest` runner.
 2. Installs Node 22 and Python 3.11.
 3. `npm install` (rebuilds native deps for both arm64 and x64).
-4. Runs `npm run dist:mac -- --publish never`.
-5. Uploads `dist/*.dmg`, `dist/*.zip`, `dist/latest-mac.yml`, and block maps as workflow artifacts.
-6. Creates a **draft** release tagged `v{run-number}-mac` with the same files attached.
-
-To publish: open the draft release on GitHub, edit the tag to a real semver (`v0.2.0`), publish.
+4. Builds the DMGs. If the Apple secrets below are set it signs with the Developer ID cert and notarizes with Apple (`-c.mac.notarize=true`); otherwise it builds unsigned.
+5. Publishes `dist/*.dmg`, `dist/*.zip`, `dist/latest-mac.yml` to the public `bensblueprints/wispertalk-releases` repo under tag `v{version}`.
 
 ### Triggering a build manually
 ```bash
-gh workflow run "Build Mac DMG" --repo bensblueprints/wispertalk-app --ref main
+gh workflow run "Build & Release" --repo bensblueprints/wispertalk-app --ref main
 ```
 
 ### Why GitHub Actions and not the Mac Mini directly
 SSH from some networks is blocked by tailnet ACL. The runners are clean, free, and reproducible. The first run is ~3 min cold; subsequent runs cache `node_modules`.
 
-## Code signing (optional)
+## Code signing
 
 ### Windows
-Add `signAndEditExecutable: true` and `certificateFile` / `certificatePassword` (or `signtoolOptions`) to `build.win` in `package.json`. We don't sign Windows builds either — SmartScreen will warn until the binary builds reputation, but installs work.
+We don't sign Windows builds — SmartScreen will warn until the binary builds reputation, but installs work.
 
-### macOS
-- Get an Apple Developer Program membership ($99/yr).
-- Generate a **Developer ID Application** cert in Apple's developer portal.
-- Set in `build.mac`: `"identity": "Developer ID Application: Your Name (TEAMID)"`.
-- Run with `CSC_LINK=<base64-encoded-p12>` and `CSC_KEY_PASSWORD=<p12-password>` in env.
-- For App Store distribution: also configure `mas` target and use a Mac App Store Distribution cert.
-- For notarization (so users don't see the right-click-Open warning): set `notarize.teamId`, plus env vars `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`.
+### macOS (signed + notarized via CI)
+Repo secrets needed on `bensblueprints/wispertalk-app`:
+
+| Secret | What |
+| --- | --- |
+| `MAC_CERTS_P12` | base64 of the **Developer ID Application** cert + private key exported as `.p12` (Keychain Access → My Certificates → right-click → Export) |
+| `MAC_CERTS_PASSWORD` | password chosen at `.p12` export |
+| `APPLE_ID` | Apple Developer account email |
+| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password from appleid.apple.com |
+| `APPLE_TEAM_ID` | 10-char Team ID from developer.apple.com → Membership |
+
+Requires an active Apple Developer Program membership ($99/yr). With those set, CI output passes Gatekeeper with no warning — users just drag to Applications and open.
 
 ## Releasing a new version
 
