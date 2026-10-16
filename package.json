@@ -120,10 +120,6 @@
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extraResources": [
         {
-          "from": "models",
-          "to": "models"
-        },
-        {
           "from": "build-assets",
           "to": ".",
           "filter": [
